@@ -231,6 +231,67 @@ def check_auto_theme_fallback() -> None:
         )
 
 
+SITE = "https://whlab.ru/"
+
+REQUIRED_META = (
+    'og:title', 'og:description', 'og:image', 'og:url', 'og:type',
+    'og:site_name', 'og:locale', 'twitter:card', 'twitter:image',
+)
+
+
+def check_meta() -> None:
+    html = read_if_present("index.html")
+    if html is None:
+        return
+
+    head = html[: html.find("</head>") if "</head>" in html else len(html)]
+    for prop in REQUIRED_META:
+        if f'property="{prop}"' not in head and f'name="{prop}"' not in head:
+            errors.append(f"index.html <head>: нет {prop}")
+
+    canon = re.search(r'<link rel="canonical" href="([^"]+)"', head)
+    if canon is None:
+        errors.append("index.html <head>: нет canonical")
+    elif canon.group(1) != SITE:
+        errors.append(f"canonical указывает на {canon.group(1)}, а не на {SITE}")
+
+    og_url = re.search(r'property="og:url" content="([^"]+)"', head)
+    if og_url and og_url.group(1) != SITE:
+        errors.append(f"og:url указывает на {og_url.group(1)}, а не на {SITE}")
+
+    img = re.search(r'property="og:image" content="([^"]+)"', head)
+    if img:
+        url = img.group(1)
+        if not url.startswith(SITE):
+            errors.append(f"og:image ведёт не на свой домен: {url}")
+        rel = url[len(SITE):]
+        if not (ROOT / rel).exists():
+            errors.append(f"og:image не существует на диске: {rel}")
+
+    notes.append(f"Мета-тегов проверено: {len(REQUIRED_META)} + canonical")
+
+
+def check_print_styles() -> None:
+    """Печать визитки — реальный сценарий, а не заморочка.
+
+    Тёмный фон на печати съедает тонер, а текст, нарисованный --muted, при
+    выключенных фонах может оказаться белым на белом. Поэтому @media print
+    обязан подставлять светлые значения явно.
+    """
+    css = read_if_present("css/style.css")
+    if css is None:
+        return
+    m = re.search(r"@media\s*print\s*\{(.*)\}\s*$", css, re.DOTALL)
+    if m is None:
+        errors.append("css/style.css: нет @media print")
+        return
+    block = m.group(1)
+    for needed in ("--bg", "--text", "--muted"):
+        if needed not in block:
+            errors.append(f"@media print не переопределяет {needed} — печать может выйти нечитаемой")
+    notes.append("Печатные правила: найдены")
+
+
 def check_light_palette_consistency() -> None:
     """Два блока светлой палитры обязаны совпадать побайтно.
 
@@ -278,6 +339,8 @@ def main() -> int:
     check_internal_links()
     check_theme()
     check_auto_theme_fallback()
+    check_meta()
+    check_print_styles()
 
     for n in notes:
         print(f"  {n}")

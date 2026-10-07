@@ -208,7 +208,40 @@ body {
   outline-offset: 2px;
 }
 
-/* --- Мелкие экраны ------------------------------------------------------ */
+/* --- Печать ------------------------------------------------------------ */
+
+/* Визитку реально печатают — из неё делают визитки. Тёмный фон на печати
+   съедает тонер, а текст, нарисованный --muted, при выключенных фонах
+   печатающего диалога может оказаться белым на белом. Поэтому цвета
+   подставляются явно, а не «надеемся, что браузер догадается». */
+@media print {
+  :root {
+    --bg: #FFFFFF;
+    --surface: #FFFFFF;
+    --surface-2: #FFFFFF;
+    --surface-hover: #FFFFFF;
+    --text: #000000;
+    --text-strong: #000000;
+    --muted: #333333;
+    --border: #BBBBBB;
+    --border-strong: #666666;
+    --accent: #14532D;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #FFFFFF;
+    --shadow: none;
+    --shadow-sm: none;
+  }
+
+  .console,
+  .card {
+    box-shadow: none;
+    break-inside: avoid;
+  }
+
+  .theme-toggle { display: none; }
+
+  a[href]::after { content: " (" attr(href) ")"; font-size: 0.75em; color: #555555; }
+}
 
 @media (max-width: 480px) {
   .wrapper { padding-block: var(--space-5); }
