@@ -93,19 +93,45 @@ def check_tokens() -> None:
 # пустую страницу вместо визитки.
 REQUIRED_TEXT = (
     "Exited3n",
-    "пентест, форензика",
+    "Pentest, Red team, DFIR",
     "FR13NDS",
-    "Active Directory",
     "elsewhere",
     "projects",
+    "best of",
     "Whitehat Lab",
     "MAX",
     "GitHub",
     "Hackerlab",
     "Standoff 365",
     "IT Movies",
+    "Whitehat Lab stats",
+    "Standoff 17",
+    "Standoff 15",
+    "Standoff 12",
+    "VKACTF",
+    "KubanCTF",
+    "Cybercoliseum",
+    "HackTheBox",
+)
+
+# Текст, который был на странице и по решению владельца убран. Проверка на
+# отсутствие, а не только на присутствие нужного: иначе удалённая строка
+# вернётся незаметно — вёрстка не сломается и ошибок не будет.
+FORBIDDEN_TEXT = (
+    "Участник команды",
+    "Active Directory",
     "Channel Stats",
-    "киберполигон",
+    "Автор каталога из 156",
+    "пентест, форензика",
+)
+
+# Эти две убраны именно с карточек в разделе elsewhere. В meta description
+# фраза «Telegram-канал о технологиях и ИИ» остаётся: там она описывает
+# страницу для поиска и убирать её значило бы потерять сведения. Поэтому
+# проверка смотрит в карточки, а не в документ целиком.
+FORBIDDEN_IN_CARDS = (
+    "Telegram-канал о технологиях",
+    "Профиль на киберполигоне",
 )
 
 
@@ -153,6 +179,75 @@ def check_content_is_static() -> None:
     for needle in REQUIRED_TEXT:
         if needle not in html:
             errors.append(f"index.html: не найден текст {needle!r} — контент обязан быть в разметке, а не собираться скриптом")
+    for needle in FORBIDDEN_TEXT:
+        if needle in html:
+            errors.append(f"index.html: текст {needle!r} удалён по решению владельца, но вернулся")
+
+    elsewhere = re.search(r'<section class="block" id="elsewhere">(.*?)</section>', html, re.S)
+    if elsewhere is None:
+        errors.append("index.html: не найден раздел elsewhere")
+    else:
+        for needle in FORBIDDEN_IN_CARDS:
+            if needle in elsewhere.group(1):
+                errors.append(f"index.html: подпись {needle!r} удалена с карточки, но вернулась")
+
+    # Разметка внутри атрибута: d="<path ...". Браузер такое значение
+    # игнорирует, иконка просто не рисуется — страница при этом выглядит
+    # рабочей, поэтому ловится только чтением разметки.
+    if 'd="<' in html:
+        errors.append(
+            "index.html: в атрибуте d= лежит разметка (d=\"<path ...) — иконка "
+            "не отрисовалась бы, а страница выглядела бы исправной"
+        )
+
+
+def check_two_theme_states() -> None:
+    """Выбор темы — из двух состояний, авто не выбирается вручную.
+
+    Автоматический режим остаётся (до первого клика страница следует за
+    ОС), но он не является пунктом выбора: переключатель ходит только между
+    тёмной и светлой. Третье состояние означало бы, что пользователь может
+    вернуться к «как в системе», а проверять это вручную — лишнее действие.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+    if re.search(r"'auto'", html) and "prefers-color-scheme" not in html:
+        errors.append("index.html: слово 'auto' осталось, но авто-режим должен быть только неявным")
+    if re.search(r"=== 'light'\s*\?\s*'auto'", html):
+        errors.append("index.html: цикл переключателя всё ещё возвращает в auto — состояний должно быть два")
+    notes.append("Состояний темы в переключателе: два (проверено по циклу)")
+
+
+def check_project_icons() -> None:
+    """У карточек проектов должны быть свои иконки.
+
+    Пустая плитка ради единообразия с разделом ссылок выглядит дырой:
+    ссылка это площадка с логотипом, проект это сайт с favicon.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+    m = re.search(r'<section class="block" id="projects">(.*?)</section>', html, re.S)
+    if m is None:
+        errors.append("index.html: не найден раздел projects")
+        return
+    block = m.group(1)
+    cards = re.findall(r'<a class="card".*?</a>', block, re.S)
+    if not cards:
+        errors.append("projects: карточек нет")
+        return
+    with_icon = [c for c in cards if ("card__icon" in c)]
+    if len(with_icon) != len(cards):
+        errors.append(
+            f"projects: иконка есть только у {len(with_icon)} из {len(cards)} карточек — "
+            "у каждого проекта своя favicon"
+        )
+    for c in with_icon:
+        for url in re.findall(r'src="([^"]+)"', c):
+            if not (ROOT / url).exists():
+                errors.append(f"projects: иконка не найдена на диске: {url}")
+    notes.append(f"Карточек проектов с иконкой: {len(with_icon)} из {len(cards)}")
 
 
 def check_internal_links() -> None:
@@ -390,6 +485,8 @@ def main() -> int:
     check_pages_exist()
     check_external_links()
     check_content_is_static()
+    check_two_theme_states()
+    check_project_icons()
     check_internal_links()
     check_theme()
     check_auto_theme_fallback()

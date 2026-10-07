@@ -43,18 +43,26 @@ body {
   box-shadow: var(--shadow);
 }
 
-.console__prompt {
+/* Аватар занимает место приглашения «$»: он отвечает на тот же вопрос
+   «кто здесь», но отвечает буквально. Знак доллара был приятной деталью
+   Ops Console и остался бы на месте, если бы аватара не было. */
+.console__avatar {
   flex: none;
   display: grid;
   place-items: center;
-  width: var(--space-6);
-  height: var(--space-6);
-  border-radius: var(--radius-pill);
+  width: 48px;
+  height: 48px;
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
   background: var(--accent-soft);
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: var(--space-4);
-  line-height: 1;
+}
+
+.console__avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius);
+  object-fit: cover;
 }
 
 .console__text { min-width: 0; }
@@ -77,14 +85,69 @@ body {
 
 .console__sep { color: var(--accent); }
 
-/* --- Обо мне ---------------------------------------------------------- */
+/* --- Результаты ---------------------------------------------------------- */
 
-.about {
-  margin: 0;
-  max-width: 60ch;
+.years {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
 }
 
-/* --- Секции ------------------------------------------------------------ */
+.year__label {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.result {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* Кубок и медаль отличаются не только формой, но и цветом: первое место
+   видно раньше, чем прочитан текст. */
+.result__icon {
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+  color: var(--accent);
+}
+
+.result__icon--gold { color: var(--gold); }
+
+.result__icon svg { width: 100%; height: 100%; }
+
+.result__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-strong);
+}
+
+.result__place {
+  flex: none;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+}
+
+/* --- Карточки ---------------------------------------------------------- */
 
 .block { display: flex; flex-direction: column; gap: var(--space-3); }
 
@@ -115,6 +178,11 @@ body {
 .cards__item { display: block; }
 
 /* --- Карточки ---------------------------------------------------------- */
+
+/* Favicon проекта кладётся как img, и его нельзя красить: подставить цвет
+   можно только обернув во внешний SVG. У stats.svg обёртка сохранена,
+   потому что знак одноцветный и currentColor ему не мешает. */
+.card__icon--svg svg { width: 100%; height: 100%; }
 
 .card {
   display: flex;
