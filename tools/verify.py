@@ -211,6 +211,39 @@ def check_content_is_static() -> None:
         )
 
 
+def check_css_sanity() -> None:
+    """Скобки сбалансированы и свойства не осиротели.
+
+    Сломанный CSS не падает: правило без селектора просто игнорируется, и
+    страница остаётся рабочей — теряются только отступы, рамки или выравнивание.
+    Один раз при вырезании правила `.card__icon--img` потерялся селектор
+    `.card {`, и его свойства прилипли к соседнему правилу: карточки остались
+    в ряд, и ни ошибка, ни браузер об этом не сказали. Проверка на баланс и
+    на строки-свойства сразу после `}` ловит именно такое.
+    """
+    for rel in ("css/style.css", "css/tokens.css", "css/fonts.css"):
+        raw = read_if_present(rel)
+        if raw is None:
+            continue
+        css = re.sub(r"/\*.*?\*/", "", raw, flags=re.DOTALL)
+        if css.count("{") != css.count("}"):
+            errors.append(
+                f"{rel}: скобки не сбалансированы — {css.count('{')} открывающих, "
+                f"{css.count('}')} закрывающих"
+            )
+        lines = css.split("\n")
+        for i, line in enumerate(lines):
+            t = line.strip()
+            if not t or t.startswith(("{", "}", "@")):
+                continue
+            if i > 0 and lines[i - 1].strip().startswith("}"):
+                errors.append(
+                    f"{rel}:{i + 1}: свойство {t!r} идёт сразу после закрывающей "
+                    "скобки — потерян селектор, и оно утекло в соседнее правило"
+                )
+    notes.append("CSS: баланс скобок и отсутствие сирот проверены")
+
+
 def check_two_theme_states() -> None:
     """Выбор темы — из двух состояний, авто не выбирается вручную.
 
@@ -503,6 +536,7 @@ def main() -> int:
     check_meta()
     check_print_styles()
     check_fonts()
+    check_css_sanity()
 
     for n in notes:
         print(f"  {n}")
