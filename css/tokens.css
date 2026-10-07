@@ -1,0 +1,126 @@
+/* Ops Console. Тёмная — референсная, светлая — та же структура в холодной
+   инверсии. Общий язык с ctf-catalog, но набор токенов свой: палитра
+   переиспользуется по назначению, а не копируется файлом, иначе первая же
+   правка в одном проекте разъедется с остальными. */
+
+:root {
+  /* Поверхности, от фона к вложенным блокам */
+  --bg: #0A0F14;
+  --surface: #0F1620;
+  --surface-2: #151E2A;
+  --surface-hover: #1B2735;
+
+  /* Текст */
+  --text: #DCE6F0;
+  --text-strong: #F2F7FC;
+  --muted: #7D8FA6;
+
+  /* Границы: --border декоративный, --border-strong несёт смысл — контуры
+     полей и фокус — и держит 3:1 (WCAG 1.4.11) на всех четырёх подложках. */
+  --border: #1E2C3D;
+  --border-strong: #647C96;
+
+  /* Акцент — сигнальный зелёный */
+  --accent: #22C55E;
+  --accent-hover: #4ADE80;
+  --accent-ink: #04140A;
+  --accent-soft: rgba(34, 197, 94, 0.14);
+
+  /* Вторичные сигналы. --danger светлее rose-500: тот даёт 4.12:1 на
+     --surface-hover и не проходит 4.5:1 для текста уровня. */
+  --info: #38BDF8;
+  --warn: #F59E0B;
+
+  /* Радиусы: приборная панель — острые углы */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  --font: 'Ubuntu', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+
+  /* Шкала отступов — единственный источник. Магические rem запрещены. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+
+  /* Асимметрия из спеки: колонка 620px внутри враппера 1000px. Справа
+     остаётся воздух, и карточки не растянуты на всю ширину. */
+  --wrapper-max: 1000px;
+  --column-max: 620px;
+
+  color-scheme: dark;
+}
+
+/* Страховка для состояния auto. В :root тёмная тема, а :root без атрибута —
+   это ровно «выбор не сделан». Без этого правила пользователь со светлой ОС,
+   не выбравший тему руками, получил бы тёмную страницу, и auto перестал бы
+   означать «как в системе». :not([data-theme]) не задевает ни одну из
+   явных тем — там атрибут стоит. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #F4F7FA;
+    --surface: #FFFFFF;
+    --surface-2: #EDF2F7;
+    --surface-hover: #E3EAF2;
+
+    --text: #16202B;
+    --text-strong: #0A121C;
+    --muted: #5A6B7E;
+
+    --border: #D3DDE8;
+    --border-strong: #6C8093;
+
+    --accent: #166534;
+    --accent-hover: #14532D;
+    --accent-ink: #FFFFFF;
+    --accent-soft: rgba(22, 101, 52, 0.1);
+
+    --info: #0369A1;
+    --warn: #8A5300;
+
+    --shadow-sm: 0 1px 2px rgba(16, 32, 43, 0.08);
+    --shadow: 0 8px 24px rgba(16, 32, 43, 0.12);
+
+    color-scheme: light;
+  }
+}
+
+/* Явная светлая тема — тот же набор значений, что и в prefers-color-scheme
+   выше. Дублируется намеренно: :not([data-theme]) не срабатывает, когда
+   атрибут выставлен, а угадывать по нему CSS не умеет. */
+[data-theme='light'] {
+  --bg: #F4F7FA;
+  --surface: #FFFFFF;
+  --surface-2: #EDF2F7;
+  --surface-hover: #E3EAF2;
+
+  --text: #16202B;
+  --text-strong: #0A121C;
+  --muted: #5A6B7E;
+
+  --border: #D3DDE8;
+  --border-strong: #6C8093;
+
+  --accent: #166534;
+  --accent-hover: #14532D;
+  --accent-ink: #FFFFFF;
+  --accent-soft: rgba(22, 101, 52, 0.1);
+
+  --info: #0369A1;
+  --warn: #8A5300;
+
+  --shadow-sm: 0 1px 2px rgba(16, 32, 43, 0.08);
+  --shadow: 0 8px 24px rgba(16, 32, 43, 0.12);
+
+  color-scheme: light;
+}
