@@ -1,0 +1,16 @@
+# Всё, что уезжает на Debian-сервер, должно остаться с LF.
+# core.autocrlf=true на Windows иначе материализует CRLF при следующей
+# выкачке, а CRLF в CSS ломает парсер и в HTML портит вывод скриптов.
+*.html text eol=lf
+*.css  text eol=lf
+*.js   text eol=lf
+*.svg  text eol=lf
+*.txt  text eol=lf
+*.webmanifest text eol=lf
+
+# Бинарное — не трогать, иначе git попытается нормализовать.
+*.png  binary
+*.webp binary
+*.ico  binary
+*.jpg  binary
+*.woff2 binary
