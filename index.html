@@ -9,6 +9,9 @@
   <link rel="canonical" href="https://whlab.ru/">
   <link rel="icon" href="static/favicon.svg" type="image/svg+xml">
   <link rel="manifest" href="static/site.webmanifest">
+  <!-- Счётчик живёт на другом хосте, поэтому соединение заранее: без этого
+       каждая загрузка страницы сначала платит за DNS и TLS Яндекса. -->
+  <link rel="preconnect" href="https://mc.yandex.ru" crossorigin>
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Exited3n">
   <meta property="og:locale" content="ru_RU">
@@ -271,6 +274,16 @@
         </ul>
       </section>
 
+      <!-- Раскрытие сбора статистики. Счётчик 113542690 шлёт Яндексу обезличенные
+           данные о визите и кликах (clickmap), вебвизор выключен. Часть
+           посетителей блокирует счётчик расширениями или DNS, поэтому цифры
+           ниже фактических. Без этой строки сбор шёл бы в никуда и без
+           объявления. -->
+      <p class="colophon">
+        Счётчик Яндекс.Метрики <code>113542690</code>: обезличенные данные о визите и кликах.
+        Вебвизор выключен. Часть посетителей блокирует счётчик, поэтому статистика ниже фактической.
+      </p>
+
     </div>
   </div>
   <script>
@@ -291,5 +304,22 @@
     window.whlabTheme.label(window.whlabTheme.effective());
   })();
   </script>
+
+  <!-- Yandex.Metrika counter. Счётчик визитки, отдельный от movies.
+       Номер в правом нижнем углу страницы дублируется намеренно: раскрытие
+       обязано быть на самой странице, где идёт сбор, а не «где-то в
+       политике», которой у визитки нет. -->
+  <script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=113542690', 'ym');
+
+    ym(113542690, 'init', {ssr:true, clickmap:true, referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+  </script>
+  <noscript><div><img src="https://mc.yandex.ru/watch/113542690" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+  <!-- /Yandex.Metrika counter -->
 </body>
 </html>
