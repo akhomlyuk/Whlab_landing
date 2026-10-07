@@ -11,6 +11,16 @@ import re
 import sys
 from pathlib import Path
 
+# Вывод не должен зависеть от того, кто и откуда запустил. На Windows
+# консоль по умолчанию cp1251, и галочка в последней строке роняла скрипт
+# с UnicodeEncodeError на ровном месте — зелёный отчёт превращался в
+# красную ошибку вывода.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass
+
 ROOT = Path(__file__).resolve().parent.parent
 
 errors: list[str] = []
