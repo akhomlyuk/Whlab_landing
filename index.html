@@ -5,6 +5,39 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Exited3n — пентест и форензика</title>
   <meta name="description" content="Exited3n: пентест и форензика, Active Directory, CTF. Канал о технологиях и ИИ, каталог фильмов и статистика.">
+  <meta name="theme-color" content="#0A0F14">
+  <script>
+  (function () {
+    var KEY = 'whlab-theme';
+    var stored = null;
+    try { stored = localStorage.getItem(KEY); } catch (e) {}
+    if (stored !== 'light' && stored !== 'dark') stored = null;
+    if (stored) document.documentElement.setAttribute('data-theme', stored);
+
+    var meta = document.querySelector('meta[name="theme-color"]');
+    function paint() {
+      if (meta) meta.setAttribute('content', stored === 'light' ? '#F4F7FA' : '#0A0F14');
+    }
+    paint();
+
+    window.whlabTheme = {
+      get: function () { return stored; },
+      set: function (next) {
+        stored = (next === 'light' || next === 'dark') ? next : null;
+        if (stored) document.documentElement.setAttribute('data-theme', stored);
+        else document.documentElement.removeAttribute('data-theme');
+        try {
+          if (stored) localStorage.setItem(KEY, stored);
+          else localStorage.removeItem(KEY);
+        } catch (e) {}
+        paint();
+      },
+      cycle: function () {
+        this.set(stored === 'dark' ? 'light' : stored === 'light' ? null : 'dark');
+      }
+    };
+  })();
+  </script>
   <link rel="stylesheet" href="css/tokens.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -18,6 +51,7 @@
           <h1 class="console__name">Exited3n</h1>
           <p class="console__role">пентест, форензика<span class="console__sep" aria-hidden="true"> · </span>10+ лет в информационной безопасности</p>
         </div>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="Тема оформления: auto">auto</button>
       </header>
 
       <p class="about">Участник команды FR13NDS &amp; RHACKERS. 10+ лет в информационной безопасности, работаю с Active Directory с 2010 года. Пентест и форензика. Автор каталога из 156 фильмов о технологиях и ИИ.</p>
@@ -103,5 +137,19 @@
 
     </div>
   </div>
+  <script>
+  (function () {
+    var b = document.querySelector('[data-theme-toggle]');
+    if (!b || !window.whlabTheme) return;
+    function label() {
+      var t = window.whlabTheme.get();
+      var n = t === 'dark' ? 'dark' : t === 'light' ? 'light' : 'auto';
+      b.textContent = n;
+      b.setAttribute('aria-label', 'Тема оформления: ' + n + '. Нажмите, чтобы переключить');
+    }
+    b.addEventListener('click', function () { window.whlabTheme.cycle(); label(); });
+    label();
+  })();
+  </script>
 </body>
 </html>

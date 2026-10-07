@@ -173,6 +173,64 @@ def check_internal_links() -> None:
     notes.append(f"Локальных ссылок проверено: {checked}")
 
 
+def check_theme() -> None:
+    """Тема обязана применяться до первой отрисовки и переживать перезагрузку.
+
+    Инлайн-скрипт в <head> — приём против вспышки светлой темы на тёмном
+    домене: поставленный в конце файла или в модуле, он отработает уже
+    после того, как браузер нарисует светлый фон.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+
+    head_end = html.find("</head>")
+    if head_end == -1:
+        errors.append("index.html: нет </head>")
+        return
+    head = html[:head_end]
+
+    if "whlab-theme" not in html:
+        errors.append("index.html: ключ localStorage 'whlab-theme' не найден")
+    if "it-movies-theme" in html:
+        errors.append(
+            "index.html: использован ключ it-movies-theme — настройки разных "
+            "доменов не должны перетирать друг друга"
+        )
+
+    scripts = re.findall(r"<script\b[^>]*>(.*?)</script>", head, re.DOTALL)
+    if not any("whlab-theme" in s for s in scripts):
+        errors.append(
+            "index.html: скрипта темы нет в <head> — он обязан быть там и "
+            "без defer, иначе видна вспышка светлой темы"
+        )
+
+    if "defer" in head and "whlab-theme" in head:
+        errors.append("index.html: скрипт темы помечен defer — применение темы уйдёт на потом")
+
+    if 'name="theme-color"' not in html:
+        errors.append("index.html: нет meta[name=theme-color] — скроллбар и нативные контролы останутся в теме ОС")
+
+    notes.append(f"Скриптов в <head>: {len(scripts)}")
+
+
+def check_auto_theme_fallback() -> None:
+    """Состояние auto обязано означать «как в системе», а не «тёмная».
+
+    Тёмная палитра живёт в :root, а :root без атрибута data-theme — это и
+    есть auto. Без prefers-color-scheme ветки светлая ОС получит тёмную
+    страницу, и никто об этом не узнает.
+    """
+    tokens = read_if_present("css/tokens.css")
+    if tokens is None:
+        return
+    if not re.search(r"@media\s*\(prefers-color-scheme:\s*light\)\s*\{[^}]*:root:not\(\[data-theme\]\)", tokens):
+        errors.append(
+            "tokens.css: нет @media (prefers-color-scheme: light) с :root:not([data-theme]) — "
+            "состояние auto не будет следовать за ОС"
+        )
+
+
 def check_light_palette_consistency() -> None:
     """Два блока светлой палитры обязаны совпадать побайтно.
 
@@ -218,6 +276,8 @@ def main() -> int:
     check_external_links()
     check_content_is_static()
     check_internal_links()
+    check_theme()
+    check_auto_theme_fallback()
 
     for n in notes:
         print(f"  {n}")
