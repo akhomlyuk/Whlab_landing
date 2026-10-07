@@ -14,9 +14,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* 1000px по центру, внутри колонка 620px по левому краю. Асимметрия
-   намеренная: справа остаётся воздух, и карточки не растянуты на всю
-   ширину. */
+/* Ширина страницы, см. --wrapper-max в tokens.css: там же замер, из
+   которого взято значение. Враппер — единственное место, где ширина
+   ограничивается; колонка внутри него ничего не добавляет, а
+   margin-inline центрирует. */
 .wrapper {
   max-width: var(--wrapper-max);
   margin-inline: auto;
@@ -24,7 +25,6 @@ body {
 }
 
 .column {
-  max-width: var(--column-max);
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -274,15 +274,27 @@ body {
 .theme-toggle {
   margin-left: auto;
   align-self: center;
-  padding: var(--space-1) var(--space-3);
+  /* Знак вместо слова. Кнопка 32px вместо 55px, и этой выигранной
+     ширины как раз хватает строке роли, чтобы не переноситься: при
+     1000px враппера ей не хватало 23px. */
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: 50%;
   background: var(--surface);
   color: var(--muted);
-  font-family: var(--mono);
-  font-size: 0.75rem;
   cursor: pointer;
   transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.theme-toggle__icon { display: none; }
+
+.theme-toggle[data-theme='light'] .theme-toggle__icon--sun,
+.theme-toggle[data-theme='dark'] .theme-toggle__icon--moon {
+  display: block;
 }
 
 .theme-toggle:hover {
