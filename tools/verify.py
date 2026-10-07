@@ -292,6 +292,60 @@ def check_print_styles() -> None:
     notes.append("Печатные правила: найдены")
 
 
+def check_fonts() -> None:
+    """Шрифт, объявленный в токенах, обязан реально грузиться.
+
+    Имя в --font/--mono само по себе ничего не значит: если @font-face нет,
+    браузер молча уходит на следующее в списке и рисует системным шрифтом.
+    Страница при этом выглядит рабочей, вёрстка не едет, ошибок в консоли
+    нет — расходится только начертание. Обнаруживается это замером ширины
+    текста, а не просмотром кода.
+
+    Проверяются обе стороны: каждый семейный шрифт из токенов имеет
+    @font-face, и каждый url() из fonts.css указывает на файл, который
+    существует.
+    """
+    tokens = read_if_present("css/tokens.css")
+    fonts = read_if_present("css/fonts.css")
+    html = read_if_present("index.html")
+    if tokens is None:
+        return
+
+    if fonts is None:
+        errors.append("css/fonts.css отсутствует — --font и --mono уйдут на системный шрифт")
+        return
+
+    declared = set()
+    for raw in re.findall(r"--(?:font|mono):\s*([^;]+);", tokens):
+        for part in raw.split(","):
+            name = part.strip().strip("'\"")
+            # Системные и общие имена шрифтом быть не могут.
+            if not name or name in {
+                "sans-serif", "serif", "monospace", "system-ui", "ui-monospace",
+                "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto",
+                "SF Mono", "Cascadia Code", "Consolas", "cursive", "fantasy",
+            }:
+                continue
+            declared.add(name)
+
+    faces = set(re.findall(r"font-family:\s*\"([^\"]+)\"", fonts))
+    for name in sorted(declared - faces):
+        errors.append(f"токен ссылается на шрифт {name!r}, но @font-face для него нет")
+
+    for url in re.findall(r"url\(\"?([^\")]+)\"?\)", fonts):
+        if url.startswith(("http://", "https://", "data:")):
+            errors.append(f"fonts.css тянет шрифт извне: {url} — самохостинг или ничего")
+            continue
+        rel = (ROOT / "css" / url).resolve().relative_to(ROOT)
+        if not (ROOT / rel).exists():
+            errors.append(f"fonts.css ссылается на отсутствующий файл: {url}")
+
+    if html is not None and "css/fonts.css" not in html:
+        errors.append("index.html не подключает css/fonts.css")
+
+    notes.append(f"Шрифтов объявлено в токенах: {len(declared)}, @font-face: {len(faces)}")
+
+
 def check_light_palette_consistency() -> None:
     """Два блока светлой палитры обязаны совпадать побайтно.
 
@@ -341,6 +395,7 @@ def main() -> int:
     check_auto_theme_fallback()
     check_meta()
     check_print_styles()
+    check_fonts()
 
     for n in notes:
         print(f"  {n}")
