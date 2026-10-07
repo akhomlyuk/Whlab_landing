@@ -484,6 +484,100 @@ def check_fonts() -> None:
     notes.append(f"Шрифтов объявлено в токенах: {len(declared)}, @font-face: {len(faces)}")
 
 
+def _codepoints(spec: str) -> set[int]:
+    """Разобрать список unicode-range в множество кодовых точек."""
+    out: set[int] = set()
+    for part in spec.split(","):
+        part = part.strip().removeprefix("U+")
+        if not part:
+            continue
+        if "-" in part:
+            lo, hi = part.split("-")
+            out |= set(range(int(lo, 16), int(hi, 16) + 1))
+        else:
+            out.add(int(part, 16))
+    return out
+
+
+def check_font_charset_coverage() -> None:
+    """Диапазоны сабсетов не перекрываются и покрывают текст страницы.
+
+    Ошибка, которую это ловит, стоила одной выкладки и выглядела
+    безобидно. У всех трёх файлов JetBrains Mono стоял одинаковый
+    `unicode-range: U+0000-00FF`. Диапазоны перекрываются, а при
+    совпадении выигрывает последнее объявление — латинский файл, в
+    котором нет кириллических глифов. Весь русский текст в
+    моноширинных элементах уходил в системный шрифт по умолчанию и
+    рисовался пропорциональным: страница не падала, вёрстка не ехала, в
+    консоли было чисто. Заметить можно только замером ширины.
+
+    Отсюда две проверки. Первая — структурная: у одного семейства и
+    веса не может быть двух одинаковых диапазонов, это всегда ошибка
+    независимо от того, какие символы на странице. Вторая — по
+    содержимому: объединение диапазонов каждого семейства обязано
+    покрывать каждый не-ASCII символ из index.html.
+    """
+    fonts = read_if_present("css/fonts.css")
+    html = read_if_present("index.html")
+    if fonts is None or html is None:
+        return
+
+    faces = []
+    for body in re.findall(r"@font-face\s*\{(.*?)\}", fonts, re.S):
+        fam = re.search(r'font-family:\s*"([^"]+)"', body)
+        weight = re.search(r"font-weight:\s*([^;]+);", body)
+        urange = re.search(r"unicode-range:\s*([^;]+);", body)
+        src = re.search(r'url\("([^"]+)"\)', body)
+        if not (fam and urange and src):
+            errors.append("@font-face без font-family, src или unicode-range")
+            continue
+        faces.append((
+            fam.group(1),
+            weight.group(1).strip() if weight else "",
+            src.group(1).rsplit("/", 1)[-1],
+            " ".join(urange.group(1).split()),
+        ))
+
+    # Первая проверка: одинаковый диапазон в одном семействе.
+    seen: dict[tuple[str, str, str], str] = {}
+    for fam, weight, fname, urange in faces:
+        key = (fam, weight, urange)
+        if key in seen:
+            errors.append(
+                f"css/fonts.css: {fam} {weight} — у {seen[key]} и {fname} "
+                f"одинаковый unicode-range ({urange}). Сабсеты перекрываются, "
+                "победит последний объявленный, а его глифов может не хватить"
+            )
+        else:
+            seen[key] = fname
+
+    # Вторая проверка: покрытие символов страницы.
+    body_text = re.sub(r"<style.*?</style>|<script.*?</script>", " ", html, flags=re.S)
+    body_text = re.sub(r"<[^>]+>", " ", body_text)
+    needed = {ord(c) for c in body_text if ord(c) > 127}
+    if not needed:
+        notes.append("Не-ASCII символов на странице нет, покрытие проверять нечем")
+        return
+
+    for fam in sorted({f[0] for f in faces}):
+        covered: set[int] = set()
+        for f_fam, _w, _fn, urange in faces:
+            if f_fam == fam:
+                covered |= _codepoints(urange)
+        missing = sorted(needed - covered)
+        if missing:
+            shown = ", ".join(f"U+{m:04X}" for m in missing[:12])
+            if len(missing) > 12:
+                shown += f" и ещё {len(missing) - 12}"
+            errors.append(
+                f"{fam}: объявленные unicode-range не покрывают "
+                f"{len(missing)} символов со страницы: {shown} — "
+                "они уйдут в системный шрифт"
+            )
+        else:
+            notes.append(f"{fam}: покрывает все {len(needed)} не-ASCII символов страницы")
+
+
 def check_light_palette_consistency() -> None:
     """Два блока светлой палитры обязаны совпадать побайтно.
 
@@ -536,6 +630,7 @@ def main() -> int:
     check_meta()
     check_print_styles()
     check_fonts()
+    check_font_charset_coverage()
     check_css_sanity()
 
     for n in notes:
