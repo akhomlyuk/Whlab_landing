@@ -1,0 +1,194 @@
+/* Раскладка визитки. Единственный источник цветов и отступов — tokens.css;
+   здесь только форма. Правило: ни одного цвета и ни одного rem мимо
+   токенов, иначе страница перестанет переключаться темой целиком. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 1000px по центру, внутри колонка 620px по левому краю. Асимметрия
+   намеренная: справа остаётся воздух, и карточки не растянуты на всю
+   ширину. */
+.wrapper {
+  max-width: var(--wrapper-max);
+  margin-inline: auto;
+  padding: var(--space-7) var(--space-4);
+}
+
+.column {
+  max-width: var(--column-max);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* --- Шапка-консоль ---------------------------------------------------- */
+
+.console {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-5) var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.console__prompt {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: var(--space-6);
+  height: var(--space-6);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--space-4);
+  line-height: 1;
+}
+
+.console__text { min-width: 0; }
+
+.console__name {
+  margin: 0;
+  color: var(--text-strong);
+  font-family: var(--mono);
+  font-size: clamp(1.5rem, 5vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.console__role {
+  margin: var(--space-1) 0 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.875rem;
+}
+
+.console__sep { color: var(--accent); }
+
+/* --- Обо мне ---------------------------------------------------------- */
+
+.about {
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* --- Секции ------------------------------------------------------------ */
+
+.block { display: flex; flex-direction: column; gap: var(--space-3); }
+
+.block__title {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: lowercase;
+}
+
+.block__title::before {
+  content: "# ";
+  color: var(--accent);
+}
+
+.cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.cards__item { display: block; }
+
+/* --- Карточки ---------------------------------------------------------- */
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  color: inherit;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.card:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent-hover);
+}
+
+.card:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 2px;
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.card__name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+
+.card__note {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+/* --- Иконки ------------------------------------------------------------ */
+
+.card__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.card__icon svg { width: 20px; height: 20px; fill: currentColor; }
+
+.card__icon--mono {
+  font-family: var(--mono);
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.card__icon--img { background: none; object-fit: contain; }
+
+/* --- Мелкие экраны ------------------------------------------------------ */
+
+@media (max-width: 480px) {
+  .wrapper { padding-block: var(--space-5); }
+  .column { gap: var(--space-5); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card { transition: none; }
+}
