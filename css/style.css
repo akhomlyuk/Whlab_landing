@@ -330,6 +330,13 @@ body {
   place-items: center;
   width: 32px;
   height: 32px;
+  /* flex: none обязателен. Без него кнопка — гибкий элемент, и когда
+     текст роли переносится и расходует ширину, она сжимается: на
+     замере от 32px до 20px по ширине при высоте 32px. Иконка при этом
+     остаётся 18x18 и перестаёт помещаться, а border-radius: 50% на
+     вытянутом боксе рисует эллипс вместо круга — луна и солнце
+     выглядели плющеными. */
+  flex: none;
   padding: 0;
   border: 1px solid var(--border);
   border-radius: 50%;
@@ -340,6 +347,16 @@ body {
 }
 
 .theme-toggle__icon { display: none; }
+
+/* Иконка не должна ни сжиматься, ни переполнять кнопку. Ширина и
+   высота заданы явно, а не наследуются от HTML-атрибутов: без
+   flex-shrink у SVG внутри grid-сетки он занимает всю доступную
+   ячейку, а при сжатой кнопке — обрезался по краям. */
+.theme-toggle__icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
 
 .theme-toggle[data-theme='light'] .theme-toggle__icon--sun,
 .theme-toggle[data-theme='dark'] .theme-toggle__icon--moon {
