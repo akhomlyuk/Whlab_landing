@@ -47,15 +47,22 @@ JetBrains Mono моноширинный с шагом 0.6em на любой гл
     правки `.place__year`/`.place__rank` этот прогон НЕ заметит.
   * Сетку. display: grid считается как один столбец — на 320px так и
     есть, но две колонки на широком экране этим не охвачены.
+  * Содержимое псевдоэлементов. `::before`/`::after` у флекс-контейнера
+    становятся его элементами и занимают место, но в дереве разбора их
+    нет, и мерить их нечем. Правило с таким псевдоэлементом проверка не
+    пропускает молча, а отказывается считать страницу годной — про
+    `.chip::after { padding: 0 120px }` прогон скажет прямо.
   * Правила, условие которых нельзя решить (min-width, всякое неведомое):
     действует худший случай. @media print не действует — страница на
     бумаге, а не на экране.
 
 Что проверка НЕ умеет и говорит об этом ошибкой, а не молчит: разбирать
-составные селекторы («.chips > .chip», «.chip:hover») там, где они
+составные селекторы («.chips > .chip», «#best .spotlight») там, где они
 объявляют то, что влияет на размер. Молча пропустить такое правило —
 значит выпустить страницу с непроверенной неразрывной строкой, то есть
-ровно тот дефект, ради которого файл написан.
+ровно тот дефект, ради которого файл написан. Обход идёт по меряемым
+боксам **и по их предкам**: размер бокса читается с них всех, и пропуск
+любого из них — тот же тихий недобор.
 
 Запуск: python tools/narrow_test.py
 Код возврата: 0 — помещается, 1 — нет.
@@ -367,8 +374,18 @@ def subject_could_match(part: str, node: Node) -> bool:
     считается опасным.
     """
     right = re.split(r"[\s>+~]+", part.strip())[-1]
-    if not right or "::" in right:
+    if not right:
         return False
+    # Псевдоэлемент — не элемент дерева, но полноценный бокс на самом
+    # элементе: ::before у флекс-контейнера становится его элементом и
+    # занимает место, а `padding` у него — реальные 240px поперёк. Отбросить
+    # его как «псевдоэлемента в дереве нет» нельзя: дерево тут ни при
+    # чём, считается раскладка. Поэтому псевдоэлемент снимается, а сам
+    # элемент проверяется как обычно.
+    if "::" in right:
+        right = re.sub(r"::[A-Za-z][\w-]*", "", right)
+        if not right:
+            return True
     right = re.sub(r":[A-Za-z][\w-]*", "", right)
     right = re.sub(r"\[[^\]]*\]", "", right)
     m = SIMPLE_SELECTOR.match(right)
@@ -481,10 +498,21 @@ def padding_x_of(bodies: list[str], font_px: float, tokens: dict[str, str]) -> f
     Берётся последнее правило, которое вообще объявляет поля: в каскаде
     побеждает написанное ниже, а не сумма. Поля и рамка при этом
     считаются независимо — они живут в разных правилах чаще, чем кажется.
+
+    `padding-inline` разбирается наравне с `padding-left/right`: это
+    логическое направление записи, а в горизонтальной раскладке оно
+    обычное поле. Не зная его, обёртка с `padding-inline` выглядела бы
+    без полей — и полоса для её детей считалась бы шире настоящей.
     """
     for body in reversed(bodies):
         left = length_px(declared(body, "padding-left"), font_px, tokens)
         right = length_px(declared(body, "padding-right"), font_px, tokens)
+        if left is None and right is None:
+            inline = length_px(declared(body, "padding-inline"), font_px, tokens)
+            start = length_px(declared(body, "padding-inline-start"), font_px, tokens)
+            end = length_px(declared(body, "padding-inline-end"), font_px, tokens)
+            left = inline if inline is not None else start
+            right = inline if inline is not None else end
         if left is not None or right is not None:
             return (left or 0.0) + (right or 0.0)
         shorthand = declared(body, "padding")
@@ -591,17 +619,29 @@ def white_space_of(rules, node: Node) -> str:
     return value or "normal"
 
 
-def container_width(rules, node: Node, strip: float, tokens: dict[str, str], font_px: float) -> float:
+def strip_root_of(tree: Tree) -> Node | None:
+    """Корень полосы — обёртка, от которой отсчитываются все поля."""
+    return next((n for n in tree.nodes if n.tag == "div" and "wrapper" in n.classes), None)
+
+
+def container_width(rules, node: Node, root: Node, outer: float,
+                    tokens: dict[str, str], font_px: float) -> float:
     """Полоса, доступная боксу элемента, — с учётом предков.
 
     Сравнивать бокс с полосой страницы нельзя: у плитки внутри .spotlight
     полоса не 288, а 238, потому что между ней и страницей стоят поля и
-    рамка панели. Отнимается оформление КАЖДОГО предка по пути — включая
-    саму .wrapper, у которой поля по бокам, если их заведут, тоже
-    отнимутся от полосы (иначе они считались бы дважды).
+    рамка панели. Отнимается оформление каждого предка по пути.
+
+    `outer` — ширина рамки полосы (обёртки), а не её внутренняя полоса,
+    и это единственный способ не вычесть поля обёртки дважды: раньше
+    content_width отнимал их сама, а обход предков отнимал ещё раз, и
+    обёртка с `padding-inline` сужала полосу вдвое против всякой
+    разумности. Поэтому здесь обход начинается с корня полосы, а сам
+    корень в списке предков пропускается.
     """
-    width = strip
-    for ancestor in node.ancestors():
+    width = outer
+    chain = [root] + [a for a in node.ancestors() if a is not root]
+    for ancestor in chain:
         bodies = own_property_bodies(rules, ancestor)
         width -= padding_x_of(bodies, font_px, tokens)
         width -= border_x_of(bodies, font_px, tokens)
@@ -751,31 +791,47 @@ SIZING_PROPS = (
 
 
 def measured_nodes(rules, tree: Tree, tokens: dict[str, str]) -> list[Node]:
-    """Боксы, чью ширину проверка сверяет с полосой.
+    """Узлы, чей размер проверка читает, — вместе с их предками.
 
-    Это неразрывные строки, контейнеры без переноса и те их дети, у
-    которых есть текст или объявленная ширина. Только размер этих боксов
-    решает, влезет ли страница. Остальное — знаки и картинки, которые
-    либо не несут текста, либо уже посчитаны вместе с родителем; о них
-    молчать можно, а об измеренных молчать нельзя. Поэтому svg, которому
-    ширину задаёт неразбираемый «.hero__shield svg», в список не
-    попадает: подписи у него нет, и решать по нему нечего.
+    Это неразрывные строки, контейнеры без переноса, те их дети, у
+    которых есть текст или объявленная ширина, **и все предки всех
+    этих узлов**. Предки нужны не из вежливости: `container_width`
+    снимает с каждого поля и рамку, а `min_content` и `font_size_of`
+    читают по цепочке вверх, — то есть размер меряемого бокса
+    складывается из размеров их всех. Проверка, которая смотрела бы
+    только на сам бокс, пропускала ровно тот случай, где поля панели
+    спрятаны за неразбираемым `#best .spotlight`: 48px исчезали из
+    модели, полоса для плитки вырастала с 238 до 286, и дефект
+    становился невидим.
+
+    Чего в списке нет: знаков и картинок, которые не несут текста и не
+    объявляют ширины, — о них молчать можно.
     """
     out: list[Node] = []
+    seen: set[int] = set()
+
+    def add(node: Node) -> None:
+        if id(node) in seen:
+            return
+        seen.add(id(node))
+        out.append(node)
+
     for node in tree.nodes:
         kind = flex_kind(rules, node)
-        carries = node.text() or fixed_width(
-            rules, node, tokens, font_size_of(rules, node, tokens)
-        ) is not None
-        if "nowrap" in white_space_of(rules, node) and carries or kind == "row":
-            out.append(node)
+        fixed = fixed_width(rules, node, tokens, font_size_of(rules, node, tokens))
+        carries = bool(node.text()) or fixed is not None
+        measured = ("nowrap" in white_space_of(rules, node) and carries) or kind == "row"
+        if not measured:
+            continue
+        add(node)
+        for ancestor in node.ancestors():
+            add(ancestor)
         if kind == "row":
             for child in node.children:
-                child_fixed = fixed_width(
+                if child.text() or fixed_width(
                     rules, child, tokens, font_size_of(rules, child, tokens)
-                )
-                if child.text() or child_fixed is not None:
-                    out.append(child)
+                ) is not None:
+                    add(child)
     return out
 
 
@@ -783,10 +839,17 @@ def check_readable_selectors(rules, tree: Tree, tokens: dict[str, str]) -> None:
     """Ни одно правило, влияющее на размер меряемого бокса, не осталось
     непрочитанным.
 
-    Составной селектор («.chips > .chip») проверка не разбирает, и раньше
-    такое правило просто исчезало: бокс считался без объявленных ему
-    полей и выходил уже настоящей ширины, то есть ровно настолько, чтобы
-    длинная подпись влезла туда, куда не влезает.
+    Составной селектор («.chips > .chip», «#best .spotlight») проверка
+    не разбирает, и раньше такое правило просто исчезало: бокс считался
+    без объявленных ему полей и выходил уже настоящей ширины, то есть
+    ровно настолько, чтобы длинная подпись влезла туда, куда не влезает.
+
+    Обход идёт по measured_nodes, а это меряемые боксы **вместе с
+    предками**: размер меряемого бокса читается с них всех, и пропуск
+    любого из них — тот же тихий недобор. Раньше аудит покрывал только
+    сам бокс, и объявление полей у его предка исчезало: `#best
+    .spotlight` съедал 48px, полоса для плитки росла с 238 до 286, а
+    прогон оставался зелёным.
 
     Отказ честнее догадки. Если правило разобрать нельзя и оно может
     бить по меряемому боксу — это ошибка, а не предупреждение: страница,
@@ -804,7 +867,7 @@ def check_readable_selectors(rules, tree: Tree, tokens: dict[str, str]) -> None:
                 return
 
 
-def check_flex_rows(rules, tree: Tree, tokens: dict[str, str], strip: float) -> None:
+def check_flex_rows(rules, tree: Tree, tokens: dict[str, str], root: Node, outer: float) -> None:
     """Неразрывная строка в негнущемся флекс-контейнере не оставляет соседям места.
 
     Без этой проверки неразрывная строка проходила бы, если бы ей хватало
@@ -819,7 +882,7 @@ def check_flex_rows(rules, tree: Tree, tokens: dict[str, str], strip: float) -> 
         if flex_kind(rules, node) != "row":
             continue
         font_px = font_size_of(rules, node, tokens)
-        available = container_width(rules, node, strip, tokens, font_px)
+        available = container_width(rules, node, root, outer, tokens, font_px)
         need = min_content(rules, node, tokens)
         checked += 1
         if need > worst:
@@ -845,14 +908,16 @@ def _sel_of(node: Node) -> str:
 def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float]:
     """Ширина обёртки на MIN_WIDTH и сколько из неё достаётся детям.
 
-    Возвращает (ширина обёртки, поля по бокам суммарно, полоса детям).
-    Поля по бокам уже вычлись как «100% - 2rem», а вот padding-inline
-    самой обёртки, если его заведут, отнимается здесь: иначе он
-    посчитался бы дважды — и оптимистично, чего делать нельзя. Формула
-    читается из самого файла, а не зашита числом: если владелец сменит
-    `100% - 2rem` на `100% - 1rem`, бюджет обязан сдвинуться вместе с
-    правкой, иначе проверка продолжит считать не тот край, который
-    нарисован.
+    Возвращает (ширина рамки полосы, поля по бокам суммарно, полоса
+    детям). Поля по бокам уже вычлись как «100% - 2rem», а padding-inline
+    самой обёртки вычитается здесь — иначе он не учитывался бы вовсе, и
+    полоса для детей вышла бы шире той, что нарисована. Проверки по
+    контейнерам берут ПЕРВУЮ величину и вычитают оформление корня сами:
+    отдать им уже вычтенную полосу значило бы вычесть обёртку дважды.
+    Формула читается из самого файла, а не зашита числом: если владелец
+    сменит `100% - 2rem` на `100% - 1rem`, бюджет обязан сдвинуться
+    вместе с правкой, иначе проверка продолжит считать не тот край,
+    который нарисован.
     """
     wrapper_rule = next((body for _, selector, body in css_rules(css)
                          if ".wrapper" in parseable(selector)[0]), None)
@@ -948,7 +1013,7 @@ def check_fixed_widths(rules, available: float) -> None:
         notes.append(f"Самая широкая фиксированная ширина: {widest:g}px из {available:g}px")
 
 
-def check_nowrap_runs(rules, tree: Tree, tokens: dict[str, str], strip: float) -> float:
+def check_nowrap_runs(rules, tree: Tree, tokens: dict[str, str], root: Node, outer: float) -> float:
     """Главная проверка: неразрывная строка обязана влезать в полосу.
 
     Сверяется не с полосой страницы, а с полосой КОНТЕЙНЕРА: у плитки
@@ -1009,7 +1074,7 @@ def check_nowrap_runs(rules, tree: Tree, tokens: dict[str, str], strip: float) -
                 continue
             run = advance * font_px * len(text)
             box = run + box_overhead(rules, node, tokens, font_px)
-            available = container_width(rules, node, strip, tokens, font_px)
+            available = container_width(rules, node, root, outer, tokens, font_px)
             measured += 1
             if box > worst:
                 worst = box
@@ -1042,8 +1107,8 @@ def main() -> int:
         )
     }
 
-    box, side_total, available = content_width(css, tokens)
-    print(f"Обёртка на {MIN_WIDTH}px: {box:g}px, из них поля {side_total:g}px, детям {available:g}px")
+    outer, side_total, available = content_width(css, tokens)
+    print(f"Обёртка на {MIN_WIDTH}px: {outer:g}px, из них поля {side_total:g}px, детям {available:g}px")
 
     # Один раз отсекаются откаты, не действующие на экране MIN_WIDTH, и
     # дальше все проверки работают с одним и тем же списком правил.
@@ -1051,11 +1116,19 @@ def main() -> int:
     tree = Tree()
     tree.feed(html)
 
+    # Проверки по контейнерам считают от ширины РАМКИ полосы, а не от её
+    # внутренней полосы: оформление корня вычитает container_width, иначе
+    # оно вычлось бы дважды — один раз в content_width, второй в обходе.
+    root = strip_root_of(tree)
+    if root is None:
+        errors.append("index.html: нет .wrapper — считать полосу контейнера не от чего")
+        root = Node("div", ("wrapper",), None)
+
     check_narrow_fallback(rules)
     check_fixed_widths(rules, available)
     check_readable_selectors(rules, tree, tokens)
-    check_flex_rows(rules, tree, tokens, available)
-    worst = check_nowrap_runs(rules, tree, tokens, available)
+    check_flex_rows(rules, tree, tokens, root, outer)
+    worst = check_nowrap_runs(rules, tree, tokens, root, outer)
 
     # Итог одной строкой: так и обещано в докстринге — проверка считает
     # минимальную ширину экрана и сравнивает её с целевой.

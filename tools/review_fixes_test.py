@@ -134,15 +134,27 @@ def _print_is_harmless(rules) -> bool:
     Печать исключается из худшего случая не по привычке, а потому что
     на бумаге кольцо обрезать нечем: если print-правило .panel явно
     ставит overflow: visible, обрезания там нет. Если кто-нибудь это
-    правило снимет, утверждение перестанет быть самоочевидным и печать
-    вернётся в разбор — где она и должна высказать своё.
+    правило снимет или перебьёт, утверждение перестанет быть
+    самоочевидным и печать вернётся в разбор — где она и должна
+    высказать своё.
+
+    Победившим считается ПОСЛЕДНЕЕ объявление overflow у .panel в
+    печати, а не любое найденное: иначе две строки подряд — сначала
+    visible, потом hidden — оставляли бы печать объявленной безобидной
+    ровно тогда, когда она режет кольцо. Селектор сверяется целиком:
+    подстрока нашла бы `.panel__title`, а это не `.panel`.
     """
+    value = None
     for media, _, selector, body in rules:
         if not any("print" in m for m in media):
             continue
-        if ".panel" in selector and re.search(r"overflow\s*:\s*visible", body):
-            return True
-    return False
+        for part in selector.split(","):
+            if " ".join(part.split()) != ".panel":
+                continue
+            declared = _declared(body, "overflow")
+            if declared is not None:
+                value = declared
+    return value is not None and value.startswith("visible")
 
 
 def _worst_case_offset(rules) -> tuple[float | None, str]:
