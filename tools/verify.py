@@ -174,7 +174,22 @@ FORBIDDEN_TEXT = (
     "Автор канала",
     # Подпись команды убрана решением владельца: FR13NDS остаётся ссылкой.
     "моя команда",
+    # Бывшая подпись карточки на киберполигоне. Список FORBIDDEN_IN_CARDS,
+    # который её охранял, удалён вместе с карточками: лента ссылок стала
+    # чипами, у которых вообще нет слота подписи, и проверять там было
+    # нечего. Запрет переносится на документ целиком, чтобы фраза не
+    # вернулась молча — ровно для этого список и существует.
+    "Профиль на киберполигоне",
 )
+
+# «Telegram-канал о технологиях и ИИ» в FORBIDDEN_TEXT сознательно НЕТ,
+# хотя раньше фраза была запрещена на карточках elsewhere. Редизайн
+# 2026-10-09 пересмотрел её статус: спека §3.4 возвращает её как подпись
+# первой строки projects («Whitehat Lab»), то есть канал теперь
+# описывается этой фразой, а не прячется от неё. Запись в meta
+# description и og:description, где она тоже есть, описывает страницу
+# для поиска и была легальна всегда. Запрещать её теперь означало бы
+# сломать Task 6.
 
 
 def check_pages_exist() -> None:
@@ -687,6 +702,16 @@ CONTRAST_PAIRS = (
     # Золото ушло вместе с раздельными кубками: Standoff собран в одну панель
     # без графики, первые места помечены текстом Top 1..Top 4, а отдельный
     # цвет для них больше не нужен.
+    #
+    # Пары (--tg, --accent) здесь НЕТ сознательно. До правки знака Telegram
+    # на акцентной кнопке глиф ложился синим на синий: 1.26:1 в светлой теме
+    # и 1.41:1 в тёмной — вчетверо ниже порога графики, и главный переход
+    # на канал был без знака. Причина не в палитре, а в каскаде: класс
+    # .pill__icon--tg висел на внутреннем <span> и перебивал наследование от
+    # .pill--accent. Теперь .pill--accent .pill__icon объявляет
+    # color: inherit, и --tg на --accent лечь уже не может — пара была бы
+    # недостижимой и падала бы сама по себе (1.26 < 3.0), то есть проверка
+    # ругалась бы на невозможное сочетание, а не на страницу.
 )
 
 
@@ -779,6 +804,18 @@ def check_link_placement() -> None:
     # встретиться на странице дважды.
     if "github.com/akhomlyuk" not in elsewhere:
         errors.append("elsewhere: нет ссылки github.com/akhomlyuk")
+
+    # Шапка проверяется отдельно от счёта вхождений. Счёт «два раза на
+    # странице» ничего не говорит о том, где именно: перенос пилюли
+    # Telegram из header в footer оставил бы счёт на месте и прошёл бы
+    # прогон, хотя главный переход на канал ушёл с первого экрана.
+    hero = re.search(r'<header class="hero">(.*?)</header>', html, re.DOTALL)
+    if hero is None:
+        errors.append("index.html: не найден <header class=\"hero\">")
+    else:
+        for url in ("t.me/wh_lab", "github.com/akhomlyuk"):
+            if url not in hero.group(1):
+                errors.append(f"hero: нет ссылки {url} — переход с первого экрана пропал")
 
     for url, where in (
         ("t.me/wh_lab", "в шапке и в projects"),
@@ -1045,11 +1082,16 @@ def check_hero() -> None:
 
 
 def check_reduced_motion() -> None:
-    """Курсор и hover-подъём обязаны отключаться при prefers-reduced-motion.
+    """Движение при вестибулярных нарушениях — помеха, а не украшение.
 
-    Спека §7 требует буквально: и курсор, и подъём выключаются. Если
-    правила нет, анимация продолжает мигать у людей с вестибулярными
-    нарушениями — тихий дефект, который не виден на обычном прогоне.
+    Проверка спрашивает саму страницу, а не сверяется с заранее
+    заданным текстом правила. Раньше она требовала литерал `transform: none`,
+    и подъём на ховере давал ей повод. Редизайн 2026-10-09 убрал подъём
+    вместе с круглыми карточками, и требование начало охранять пустоту: CSS
+    держал `transform: none` для селекторов, которые не объявляют никакого
+    transform, а прогон печатал «подъём отключается» про подъём, которого
+    нет. Теперь transform требуется гасить только если он где-то на странице
+    реально объявлен, а заметка говорит о том, что на странице есть.
     """
     css = read_if_present("css/style.css")
     if css is None:
@@ -1060,15 +1102,37 @@ def check_reduced_motion() -> None:
     if m is None:
         errors.append("style.css: нет @media (prefers-reduced-motion: reduce)")
         return
-    block = m.group(1)
+    block = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.DOTALL)
+
+    # Всё вне блока отката: transform, который надо погасить, может быть
+    # объявлен где угодно — и до медиа-блока, и после.
+    outside = re.sub(r"/\*.*?\*/", "", css[: m.start()] + css[m.end() :], flags=re.DOTALL)
+
     # animation: none больше не требуется: мигающий курсор убран
     # решением владельца, анимации на странице не осталось. Проверять
     # нечего — требовало бы только выдуманного правила в CSS.
     if re.search(r"animation\s*:[^;}]*\binfinite", block):
         errors.append("reduced-motion: бесконечная анимация не отключается")
-    if "transform: none" not in block:
-        errors.append("reduced-motion: hover-подъём не отключается — нет transform: none")
-    notes.append("Reduced-motion: подъём отключается, анимаций нет")
+
+    # (?<![\w-]) отсекает -webkit-transform и transform-like классы.
+    has_transform = re.search(r"(?<![\w-])transform\s*:", outside) is not None
+    has_transition = re.search(r"(?<![\w-])transition\s*:\s*(?!none)", outside) is not None
+
+    if has_transform and "transform: none" not in block:
+        errors.append(
+            "reduced-motion: на странице объявлен transform, но он не отключается — "
+            "в блоке отката нет transform: none"
+        )
+    if has_transition and "transition: none" not in block:
+        errors.append(
+            "reduced-motion: на странице объявлены переходы, но они не отключаются — "
+            "в блоке отката нет transition: none"
+        )
+
+    if has_transform:
+        notes.append("Reduced-motion: transform и переходы отключаются, анимаций нет")
+    else:
+        notes.append("Reduced-motion: transform на странице нет, отключаются переходы")
 
 
 def check_light_palette_consistency() -> None:
