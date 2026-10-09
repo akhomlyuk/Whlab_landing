@@ -252,7 +252,13 @@ def check_content_is_static() -> None:
     # Порядок в DOM = порядок чтения и порядок на узком экране (спека §2.2).
     # projects поднимается над elsewhere: это самые кликабельные ссылки
     # страницы, и на телефоне до них должен быть один прокрут, а не три.
-    order = [m.group(1) for m in re.finditer(r'<section class="block" id="([a-z]+)">', html)]
+    #
+    # В списке классов секции допускаются модификаторы: `class="block[^"]*"`,
+    # а не `class="block"`. Блок --panel (у блоков с тяжёлой панелью) —
+    # ровно такой модификатор, и точное совпадение перестало бы находить
+    # projects вовсе: раздел молча выпал бы из проверки порядка, а страница
+    # осталась бы выглядеть рабочей.
+    order = [m.group(1) for m in re.finditer(r'<section class="block[^"]*" id="([a-z]+)">', html)]
     if order != ["about", "projects", "best", "elsewhere"]:
         errors.append(
             f"index.html: порядок разделов {order}, ожидался "
@@ -343,12 +349,20 @@ def check_project_icons() -> None:
     html = read_if_present("index.html")
     if html is None:
         return
-    m = re.search(r'<section class="block" id="projects">(.*?)</section>', html, re.S)
+    # Классы секции ищутся как `class="block[^"]*"`: у projects в списке
+    # есть модификатор --panel, и точное `class="block"` не нашло бы
+    # раздел — проверка упала бы «не найден раздел projects» на вполне
+    # годной разметке.
+    m = re.search(r'<section class="block[^"]*" id="projects">(.*?)</section>', html, re.S)
     if m is None:
         errors.append("index.html: не найден раздел projects")
         return
     block = m.group(1)
-    rows = re.findall(r'<a class="row".*?</a>', block, re.S)
+    # Модификатор в списке классов строки (`row row--accent`) тоже должен
+    # попадать в выборку. С точным `<a class="row"` первая строка панели —
+    # та самая, что несёт главный переход на канал — не находилась вовсе:
+    # проверка рапортовала «3 из 3» и молча пропускала знак канала.
+    rows = re.findall(r'<a class="row(?:\s[^"]*)?".*?</a>', block, re.S)
     if not rows:
         errors.append("projects: строк нет")
         return
@@ -678,6 +692,12 @@ def _contrast(a: str, b: str) -> float:
 # плитке, и на карточке (знак в пилюле лежит прямо на фоне карточки),
 # --text и --muted на всех трёх. Пропущенная пара — это не «сработает
 # позже», а тихая дыра: первая же правка палитры проходит незамеченной.
+#
+# Подложка вложенных блоков — --surface, а не --bg: подписи строк
+# панели projects рисуются --muted, а знаки на них --accent, и пары с
+# --surface обязаны стоять в списке отдельно от пар с --bg. Обе уже там
+# есть, повторно добавлять не нужно: дубликат проверяет то же сочетание
+# второй раз и только засоряет список.
 CONTRAST_PAIRS = (
     # Текст на фоне
     ("--text", "--bg", 4.5),
@@ -712,6 +732,15 @@ CONTRAST_PAIRS = (
     # color: inherit, и --tg на --accent лечь уже не может — пара была бы
     # недостижимой и падала бы сама по себе (1.26 < 3.0), то есть проверка
     # ругалась бы на невозможное сочетание, а не на страницу.
+    #
+    # Пары (--tg, --accent-soft) здесь нет по другой причине, и она
+    # техническая: --accent-soft это rgba(), а сравнение ниже пропускает
+    # любое значение, не начинающееся с «#». Пара с ним была бы
+    # vacuously верной в обеих темах — проверка молча соглашалась бы с
+    # чем угодно. Реальные числа на композите (--tg поверх --accent-soft
+    # поверх --surface): 4.96:1 в тёмной и 4.13:1 в светлой, оба выше
+    # порога графики 3:1. Знак канала в фирменном синем на голубой
+    # плитке акцентной строки панели защищён этими числами, а не списком.
 )
 
 
@@ -775,8 +804,10 @@ def check_link_placement() -> None:
     if html is None:
         return
 
+    # Модификаторы в списке классов секции допускаются — та же причина,
+    # что в check_project_icons: у projects есть `block--panel`.
     def section(name: str) -> str | None:
-        m = re.search(rf'<section class="block" id="{name}">(.*?)</section>', html, re.DOTALL)
+        m = re.search(rf'<section class="block[^"]*" id="{name}">(.*?)</section>', html, re.DOTALL)
         if m is None:
             errors.append(f"index.html: не найден раздел {name}")
             return None
