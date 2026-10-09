@@ -33,27 +33,226 @@ def check(name: str, ok: bool, detail: str) -> None:
 
 # --- Дефект 1: фокус-кольцо срезается overflow:hidden на .panel -----------
 
+def _rules(css: str) -> list[tuple[tuple[str, ...], int, str, str]]:
+    """Правила файла как (медиа-цепочка, номер по порядку, селектор, тело).
+
+    Порядок в файле — часть каскада, поэтому он и сохраняется: два
+    правила одинаковой специфичности решает именно то, которое ниже.
+    Счётчик сквозной, включая вложенные правила: номер, выданный внутри
+    @media, должен быть БОЛЬШЕ номера всего, что стояло до блока. Иначе
+    правило с отступом 2px внутри @media (max-width: 640px) получило бы
+    меньший номер, чем настоящее -2px выше по файлу, и при равной
+    специфичности проиграло бы — а на экране уже 640px оно как раз и
+    побеждает. Комментарии снимаются, иначе объяснение про -2px
+    посчиталось бы за само объявление.
+
+    ВНУТРЬ @media заходится, а не перескакивается. Раньше любое правило
+    под @media просто выпадало из разбора, и каскад считался по одной
+    лишь широкой половине файла. Условие медиа вычислить нельзя,
+    поэтому решает _worst_case_offset.
+    """
+    clean = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    out: list[tuple[tuple[str, ...], int, str, str]] = []
+    counter = [0]
+
+    def walk(source: str, media: tuple[str, ...]) -> None:
+        prelude = ""
+        i, n = 0, len(source)
+        while i < n:
+            if source[i] == "{":
+                depth, j = 1, i + 1
+                while j < n and depth:
+                    if source[j] == "{":
+                        depth += 1
+                    elif source[j] == "}":
+                        depth -= 1
+                    j += 1
+                selector = " ".join(prelude.split())
+                if selector.startswith("@media"):
+                    walk(source[i + 1:j - 1], media + (selector,))
+                elif selector and not selector.startswith("@"):
+                    out.append((media, counter[0], selector, source[i + 1:j - 1]))
+                counter[0] += 1
+                prelude = ""
+                i = j
+            elif source[i] == ";":
+                prelude = ""
+                i += 1
+            else:
+                prelude += source[i]
+                i += 1
+
+    walk(clean, ())
+    return out
+
+
+def _declared(body: str, prop: str) -> str | None:
+    """Значение ПОСЛЕДНЕГО объявления prop в теле правила.
+
+    Именно последнего: в каскаде побеждает написанное ниже, а re.search
+    брал первое. Здесь ошибка уходила вбок — к отступу 2px вместо -2px,
+    то есть к провалу на годном коде, — но по счастливой случайности
+    всегда в красную сторону, и заметить её было трудно.
+    """
+    found = re.findall(rf"(?<![\w-]){re.escape(prop)}\s*:\s*([^;{{}}]+)", body)
+    return found[-1].strip() if found else None
+
+
+def _specificity(selector: str) -> tuple[int, int, int]:
+    """Специфичность (id, класс, элемент) по Каскаду 2.
+
+    Псевдокласс считается классом, псевдоэлемент — элементом: именно
+    поэтому `.panel .row:focus-visible` (0,3,0) перебивает
+    `.row:focus-visible` (0,2,0), даже объявленный ниже.
+
+    Порядок подсчёта важен. Старый вариант искал `[a-zA-Z][\\w-]*` по всей
+    строке и находил `visible` в `.row:focus-visible` (перед ним стоит
+    дефис, а он в класс запрета не входил) и `href` внутри `[href]` —
+    то есть насчитывал лишние элементы: `.row:focus-visible` получался
+    (0,2,1) вместо (0,2,0). Решения это не переворачивало, потому что
+    лишний элемент появлялся у обоих соперников одинаково, но «по
+    Каскаду 2» в докстринге было неправдой. Теперь сначала вырезаются
+    атрибуты, id, классы и псевдоклассы, и остаются одни имена тегов.
+    """
+    ids = len(re.findall(r"#[A-Za-z][\w-]*", selector))
+    classes = len(re.findall(r"\.[A-Za-z][\w-]*", selector))
+    classes += len(re.findall(r"\[[^\]]*\]", selector))
+    classes += len(re.findall(r"(?<!:):(?!:)[A-Za-z][\w-]*", selector))
+
+    rest = re.sub(r"\[[^\]]*\]", " ", selector)
+    rest = re.sub(r"#[A-Za-z][\w-]*", " ", rest)
+    rest = re.sub(r"\.[A-Za-z][\w-]*", " ", rest)
+    rest = re.sub(r"::[A-Za-z][\w-]*", "x", rest)          # псевдоэлемент — элемент
+    rest = re.sub(r"(?<!:):[A-Za-z][\w-]*", " ", rest)     # псевдокласс — класс
+    elements = len(re.findall(r"(?<![\w-])[A-Za-z][\w-]*", rest))
+    return ids, classes, elements
+
+
+def _subject_of(part: str) -> str:
+    """Правая часть селектора — та, к чему он относится.
+
+    `#best .panel` относится к `.panel`, и именно он перебивает
+    `.panel { overflow: visible }` по специфичности. Сравнение строкой
+    целиком такой селектор отвергло бы, а подстрока нашла бы заодно и
+    `.panel__title`, а это вовсе не `.panel`.
+    """
+    right = re.split(r"[\s>+~]+", part.strip())[-1]
+    right = re.sub(r"::[A-Za-z][\w-]*", "", right)
+    right = re.sub(r":[A-Za-z][\w-]*(?:\([^)]*\))?", "", right)
+    right = re.sub(r"\[[^\]]*\]", "", right)
+    return " ".join(right.split())
+
+
+def _print_is_harmless(rules) -> bool:
+    """Снимает ли @media print обрезание у .panel.
+
+    Печать исключается из худшего случая не по привычке, а потому что
+    на бумаге кольцо обрезать нечем: если ПОБЕДИВШЕЕ правило .panel в
+    печати ставит overflow: visible, обрезания там нет. Если кто-нибудь
+    это правило снимет или перебьёт, утверждение перестанет быть
+    самоочевидным и печать вернётся в разбор — где она и должна
+    высказать своё.
+
+    Побеждает каскад, а не порядок в файле: `#best .panel { overflow:
+    hidden }` (1,1,0) перебивает `.panel { overflow: visible }` (0,1,0)
+    где бы ни стоял. Предикат, который брал последнее по файлу, такую
+    печать объявлял безобидной — а кольцо на бумаге срезалось.
+    Предыдущий его вариант был строго хуже: сверял селектор подстрокой и
+    принимал любое объявление overflow, не спрашивая, какое выигрывает.
+    """
+    best: tuple[bool, tuple[int, int, int], int, str] | None = None
+    for media, order, selector, body in rules:
+        if not any("print" in m for m in media):
+            continue
+        value = _declared(body, "overflow")
+        if value is None:
+            continue
+        for part in selector.split(","):
+            part = " ".join(part.split())
+            if _subject_of(part) != ".panel":
+                continue
+            important = "!important" in body
+            candidate = (important, _specificity(part), order, value)
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+    return best is not None and best[3].startswith("visible")
+
+
+def _worst_case_offset(rules) -> tuple[float | None, str]:
+    """Худший отступ, который строка панели получит хоть где-нибудь.
+
+    Условие @media вычислить нельзя, поэтому все откаты считаются
+    действующими разом: если хоть на одном экране кольцо уедет наружу,
+    страница не годна, даже если на остальных всё верно. Альтернатива —
+    объявить условие неразрешимым и отказаться проверять вовсе, но тогда
+    прогон молчал бы на любой будущей правке отката, а это ровно тот
+    случай, ради которого проверка написана.
+
+    Печать из худшего случая убрана, если _print_is_harmless.
+    """
+    skip_print = _print_is_harmless(rules)
+    best: tuple[bool, tuple[int, int, int], int, float] | None = None
+    where = "—"
+    for media, order, selector, body in rules:
+        if skip_print and any("print" in m for m in media):
+            continue
+        value = _declared(body, "outline-offset")
+        if value is None:
+            continue
+        m = re.match(r"(-?[\d.]+)px\s*(!important)?", value)
+        if m is None:
+            continue
+        for part in selector.split(","):
+            part = " ".join(part.split())
+            if ".row:focus-visible" not in part:
+                continue
+            candidate = (bool(m.group(2)), _specificity(part), order, float(m.group(1)))
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+                where = f"{part} (в {' и '.join(media) if media else 'всегда'})"
+    return (best[3] if best else None), where
+
+
+
 def test_panel_focus_not_clipped() -> None:
     """Обводка фокуса на строках панели не должна срезаться её же overflow.
 
     Панель обрезает углы через overflow: hidden, а outline с offset 2px
     рисуется за пределами бокса строки. Клавиатурный пользователь на
     первой строке не видел индикатора фокуса почти совсем.
+
+    Класс строки сегодня `.row`, а не `.card`: плитка проектов стала
+    строкой панели. Поэтому проверка спрашивает не «есть ли правило с
+    -2px», а «какой отступ в итоге получит строка внутри панели» — см.
+    _worst_case_offset. Строка в файле этого не доказывает: правило с
+    -2px под общим списком фокуса выглядит в тексте точно так же, как
+    живое, а кольцо при этом срезается по-старому. То же и с откатом:
+    override с отступом 2px внутри @media ничем не отличается по тексту
+    от нужного -2px, пока не посчитаешь каскад целиком.
     """
     css = read("css/style.css")
     panel = re.search(r"\.panel\s*\{(.*?)\}", css, re.DOTALL)
     assert panel is not None, "нет правила .panel"
 
     has_overflow_hidden = "overflow: hidden" in panel.group(1)
-    has_inset_focus = re.search(
-        r"\.panel\s+\.card:focus-visible\s*\{[^}]*outline-offset:\s*-2px", css, re.DOTALL
-    )
+    rules = _rules(css)
+    winner, where = _worst_case_offset(rules)
+
+    if winner is None:
+        check(
+            "focus-ring not clipped in .panel",
+            not has_overflow_hidden,
+            "у .panel есть overflow: hidden и нет ни одного правила фокуса "
+            "для .row — обводка срезается панелью, а индикатора нет вовсе",
+        )
+        return
 
     check(
         "focus-ring not clipped in .panel",
-        (not has_overflow_hidden) or has_inset_focus is not None,
-        "у .panel есть overflow: hidden и нет outline-offset: -2px — "
-        "обводка фокуса на строках обрезается панелью",
+        (not has_overflow_hidden) or winner <= 0,
+        f"у .panel есть overflow: hidden, а строка внутри него получает "
+        f"outline-offset: {winner:g}px (побеждает {where}) — кольцо рисуется "
+        "за пределами строки и срезается панелью",
     )
 
 
@@ -77,6 +276,60 @@ def test_print_overrides_brand_colors() -> None:
         not missing,
         f"@media print не переопределяет: {', '.join(missing)} — "
         "фирменные знаки печатаются белым по белому или цветным по бумаге",
+    )
+
+
+# --- Дефект 4 (отменён решением владельца): акцентной кнопки в шапке нет ---
+
+def test_no_accent_pill() -> None:
+    """В шапке не должно быть акцентной кнопки — решение владельца.
+
+    Здесь стоял прежде обратный тест: `.pill--accent .pill__icon` обязан был
+    объявлять color: inherit, иначе знак Telegram ложился --tg на --accent
+    (1.26:1 в светлой теме, 1.41:1 в тёмной) и просто исчезал. Дефект был
+    настоящим — но чинился он двумя способами, и владелец выбрал второй:
+    2026-10-09, посмотрев собранную страницу, он сказал «не надо ее синим
+    выделять». Обе ссылки в шапке теперь оформлены одинаково, акцентной
+    кнопки на странице нет, а значит нет и каскада, который чинился.
+
+    Тест, охраняющий несуществующий селектор, охраняет пустоту: он падал бы
+    ровно на правильном коде и молчал бы на неправильном — ровно то, от чего
+    отказались в check_reduced_motion с требованием transform: none. Поэтому
+    на его месте стоит проверка нового решения, а новым решением здесь
+    называется не «теста нет», а «голубой фон сюда не вернётся»: ни
+    классом на ссылке, ни правилом в CSS.
+    """
+    html = read("index.html")
+    css = read("css/style.css")
+
+    hero = re.search(r'<header class="hero">(.*?)</header>', html, re.DOTALL)
+    if hero is None:
+        check(
+            "no accent pill in hero",
+            False,
+            'не найден <header class="hero"> — проверять нечего',
+        )
+    else:
+        check(
+            "no accent pill in hero",
+            "pill--accent" not in hero.group(1),
+            "у ссылки Telegram в шапке снова класс pill--accent — владелец "
+            "2026-10-09 решил, что выделять её синим не надо",
+        )
+
+    painted = []
+    for _media, _order, selector, body in _rules(css):
+        if _declared(body, "background") != "var(--accent)":
+            continue
+        for part in selector.split(","):
+            part = " ".join(part.split())
+            if re.search(r"(^|[\s>+~])\.pill(\s|$|:)", part):
+                painted.append(part)
+    check(
+        "no accent pill background in CSS",
+        not painted,
+        f"фоном var(--accent) красятся: {', '.join(sorted(set(painted)))} — "
+        "акцентная кнопка в шапке отменена решением владельца от 2026-10-09",
     )
 
 
@@ -111,7 +364,8 @@ def test_contrast_pairs_cover_actual_usage() -> None:
         ("--tg", "--surface-2"),
         ("--brand-ink", "--surface"),
         ("--brand-ink", "--surface-2"),
-        ("--gold", "--surface"),
+        # --gold убран из сети вместе с кубками (редизайн 2026-10-09):
+        # пара проверяла бы цвет, которого на странице больше нет.
     }
 
     missing = sorted(required - present)
@@ -127,6 +381,7 @@ def main() -> int:
     test_panel_focus_not_clipped()
     test_print_overrides_brand_colors()
     test_contrast_pairs_cover_actual_usage()
+    test_no_accent_pill()
 
     for p in passes:
         print(f"  PASS: {p}")

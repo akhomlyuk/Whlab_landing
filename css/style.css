@@ -19,8 +19,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Ширина страницы, спека §2: min(900px, 100% - 2rem). Отступ по бокам
-   входит в 100% - 2rem, поэтому padding-inline не нужен — иначе поля
+/* Ширина страницы, спека §2: min(1040px, 100% - 2rem), где 1040px —
+   это --wrapper-max из tokens.css. Отступ по бокам входит в
+   100% - 2rem, поэтому padding-inline не нужен — иначе поля
    получились бы 2rem плюс ещё 1rem. Враппер — единственное место,
    где ширина ограничивается; margin-inline центрирует. */
 .wrapper {
@@ -113,27 +114,57 @@ body {
 
 /* --- CTA-пилюли -------------------------------------------------------- */
 
-/* Спека §5: тап не меньше 44px, поэтому min-height, а не padding —
-   на длинной подписи он бы сжался. */
+/* Прямоугольник с небольшим радиусом, а не пилюля: под именем две
+   ссылки-подписи, и круглые торцы делали ряд из них похожим на
+   декоративную ленту. --radius достаточно, он же отдаёт кнопке вид,
+   согласованный с плитками. */
 .pill {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   min-height: 44px;
   padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   background: var(--surface);
   color: var(--text-strong);
   font-weight: 500;
   text-decoration: none;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .pill:hover {
-  box-shadow: var(--shadow);
-  transform: translateY(-2px);
+  border-color: var(--signal);
 }
 
+/* Telegram и GitHub в шапке оформлены одинаково — решение владельца от
+   2026-10-09, отменившее прежнее «канал остаётся акцентной кнопкой».
+   Владелец посмотрел на собранную страницу и сказал прямо: «не надо ее
+   синим выделять». Два одинаковых бокса под именем читаются как один ряд
+   ссылок, а голубая кнопка выбивалась из палитры и перетягивала на себя
+   внимание раньше, чем имя.
+
+   Спека §3.1 поправлена в том же решении; здесь класса .pill--accent
+   больше нет, и правил для него тоже: модификатор без потребителей —
+   это ровно тот мёртвый CSS, которого check_tokens не видит, а
+   check_no_literals_outside_tokens и подавно. */
+
+/* Фирменный чёрный GitHub на тёмной плитке даёт 1.07:1 и просто
+   пропадает, поэтому знак красится в --brand-ink.
+
+   Класса .pill__icon--tg не существует — и не только потому, что кнопка
+   больше не акцентная. Он был добавлен под пару «--tg на --accent»:
+   фирменный синий на голубом фоне даёт 1.26:1 (светлая) и 1.41:1
+   (тёмная), то есть знак главного перехода на канал просто исчезал, а
+   пара всё равно оставалась в контрастной сети, потому что объявить её
+   на бумаге было нечем. Правило, которого нигде не видно, — мёртвый CSS:
+   его удаление ничего не меняет на странице, но оставляет --tg в поле
+   зрения у того, кто правит кнопку.
+
+   Знак Telegram в шапке красится как текст кнопки (--text-strong), и
+   контраст с --surface держит текстовый порог. --tg остаётся живым
+   токеном: его по-прежнему держит .row--accent .row__icon в панели
+   projects, где знак лежит на тонированной плитке, а не на фоне. */
 .pill__icon {
   flex: none;
   display: grid;
@@ -144,54 +175,101 @@ body {
 
 .pill__icon svg { width: 100%; height: 100%; fill: currentColor; }
 
-/* Фирменные цвета вместо акцента: Telegram и так синий, а фирменный
-   чёрный GitHub на тёмной плитке даёт 1.07:1 и просто пропадает. */
-.pill__icon--tg { color: var(--tg); }
 .pill__icon--brand { color: var(--brand-ink); }
 
 /* --- Секции ------------------------------------------------------------ */
 
+/* Спека §2: широкий экран — две колонки, projects шире и тянется на обе
+   строки. Названия областей вместо номеров строк: перестановка блоков
+   в разметке не должна ломать раскладку, а области это выражают.
+   Порядок в DOM (hero, about, projects, best, elsewhere) совпадает с
+   порядком на узком экране, поэтому order не нужен нигде. */
 main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-section);
+  display: grid;
+  grid-template-areas:
+    'about projects'
+    'elsewhere projects'
+    'best best';
+  grid-template-columns: 1fr 1.25fr;
+  column-gap: var(--space-6);
+  /* Ряды без общего отступа: у каждого блока своя вертикальная ритмика,
+     а один row-gap на все три ряда растянул бы промежуток между фактами
+     в about до размера секции. */
+  row-gap: 0;
+  align-items: start;
 }
+
+#about     { grid-area: about; }
+#projects  { grid-area: projects; }
+#best      { grid-area: best; }
+#elsewhere { grid-area: elsewhere; }
+
+/* Вертикальные отступы внутри грида задаются полями: в гриде и во flex
+   поля не схлопываются, поэтому ритмика предсказуема — в отличие от
+   margin-top у соседних блочных элементов. */
+#about     { margin-block-end: var(--space-5); }
+
+/* Отступ сверху у best — тот же --space-section, что и швы .wrapper.
+     Раньше он стоял поверх block-gap, и над «#best of» получалась дыра
+     в 198px — владелец отметил её отдельно, и именно она была самым
+     заметным местом страницы. Теперь это ровно один шов, а не полтора:
+     retune --space-section 2026-10-09 снял 40px отсюда и 39px у соседних
+     секций, и третий ряд отделился от второго так же, как второй от
+     первого. Отдельного числа здесь намеренно нет: если бы #best отодвигался
+     не тем же токеном, правка ритма разъехалась бы в двух местах сразу. */
+#best      { margin-block-start: var(--space-section); }
 
 .block {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  /* Грид-элемент по умолчанию не даёт сжиматься уже своего содержимого
+     (min-width: auto). Длинная строка в карточке projects растянула бы
+     трек 1.25fr шириной текста, и колонки перестали бы быть колонками —
+     страница при этом выглядит рабочей, править придётся по факту. */
+  min-width: 0;
 }
 
-/* Спека §4: mono 500, висячий _ вместо прежнего префикса «# ».
-   Нижнее подчёркивание читается как незакрытый промпт — незаконченная
-   мысль, а не закрытая строка. */
+/* Спека §4: mono 500, решётка вместо прежнего висячего `_`. Подчёркивание
+   читалось как незакрытый промпт — незаконченная мысль, а решётка в
+   начале читается как рут и рифмуется с `$ whoami` в шапке. */
 .block__title {
   margin: 0;
   font-family: var(--mono);
   font-size: clamp(1.5rem, 4vw, 2rem);
   font-weight: 500;
   color: var(--text-strong);
-  text-transform: lowercase;
   text-wrap: balance;
 }
 
-.block__caret { color: var(--accent); }
+/* Отступ от заголовка до содержимого разный: у блоков с панелью он
+   больше, панель тяжелее строки текста. Промежуточный отступ — тот же,
+   что и под `$ whoami`, где промпт тоже отделён от содержимого. */
+.block--panel > .block__title { margin-block-end: var(--space-5); }
+
+.block__hash { color: var(--accent); }
 
 /* about — список фактов, а не абзац: каждый пункт отвечает на свой
    вопрос, и ссылка внутри факта остаётся на своём месте при правке
    соседней строки. */
+/* Факты читаются списком, а не тремя абзацами: 2026-10-09 владелец
+   назвал их «растянутыми» и отметил все три. Поэтому gap ужат до
+   --space-1, а межстрочный интервал самого факта — до 1.45 (было 1.65 от
+   body, то есть 26.4px на 17px текста). Итоговый шаг строки списка вместо
+   34.4px — около 29px: факты остаются отдельными строками, но стоят
+   плотно, как список, а не как три абзаца с пустыми промежутками. */
 .facts {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-1);
 }
 
 .fact {
   font-size: 1.0625rem;
+  line-height: 1.45;
   color: var(--text);
   text-wrap: pretty;
 }
@@ -210,200 +288,279 @@ main {
   outline-offset: 2px;
 }
 
-/* --- Карточки ---------------------------------------------------------- */
+/* --- Чипы: лента ссылок ------------------------------------------------- */
 
-.cards {
+/* Ширина по содержимому, а не сетка. Владелец добавляет ссылки, и
+   фиксированная сетка ломалась бы на каждой новой: чип на flex-wrap
+   занимает ровно свою ширину, новая ссылка встаёт в конец строки или
+   переносится. На узком экране чипы перестают помещаться и сами уходят
+   в столбик — отдельное медиа-правило не нужно. */
+.chips {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
-.cards__item { display: block; }
+/* li остаются обычными флекс-элементами, без display: contents. Бокс li
+   и так равен ширине чипа: чип объявлен white-space: nowrap, поэтому
+   min-content li равен его содержимому и перенос считается по ссылке.
+   contents убрал бы пункты списка из дерева доступности у части
+   браузеров и скринридеров — ради выигрыша, которого здесь нет. */
 
-/* Спека §5: карточка без рамки — плотность была главной болью
-   владельца, и рамка вокруг каждой добавляла к ней ещё слой линий. */
-.card {
-  display: flex;
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  text-decoration: none;
-  color: inherit;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.card:hover {
-  box-shadow: var(--shadow);
-  transform: translateY(-2px);
-}
-
-/* Зелёный остался микро-сигналом: на ховере плитка знака отзывается,
-   а не вся карточка перекрашивается. */
-.card:hover .card__icon { color: var(--signal); }
-
-/* Знак внутри плитки. Размер задаётся не контейнером, а самим знаком —
-   единственный способ уравнять их, потому что плотность заполнения кадра
-   у всех разная: измерено по исходникам hackerlab.png занимает 100%
-   кадра, fr13nds-rhackers 91×82%, movies 95×72%, а у Standoff и stats
-   рисунок мелкий внутри чёрного квадрата во весь viewBox и им наоборот
-   нужен крупный размер.
-     --sm 20px  Telegram, GitHub — линейные иконки с отбивкой в координатах
-     --md 24px  HackerLab, FR13NDS, IT Movies, MAX — плотный растр
-     --lg 30px  Standoff, stats — блоковые знаки с мелким рисунком внутри */
-.card__mark {
-  display: block;
-  flex: none;
-  object-fit: contain;
-}
-
-.card__mark--sm { width: 20px; height: 20px; }
-.card__mark--md { width: 24px; height: 24px; }
-.card__mark--lg { width: 30px; height: 30px; }
-
-.card__mark--tg { color: var(--tg); }
-.card__mark--brand { color: var(--brand-ink); }
-
-/* Плитка 44px, радиус 10px — размер сохранён с прежней раскладки:
-   знаки выровнены по ней, и меньший размер стянул бы строки. */
-.card__icon {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--accent);
-}
-
-.card__icon img,
-.card__icon svg {
-  display: block;
-  object-fit: contain;
-}
-
-.card__icon svg { fill: currentColor; }
-
-.card__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.card__name {
-  color: var(--text-strong);
-  font-size: 1.0625rem;
-  font-weight: 500;
-}
-
-.card__note {
+  background: var(--surface);
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.875rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-/* --- Projects: одна широкая карточка ------------------------------------ */
+.chip:hover {
+  color: var(--signal);
+  border-color: var(--signal);
+}
 
-/* Три равные плитки читались как галерея. Одна панель со строками
-   читается как список сделанного, а круглые углы панели видны только
-   на первой и последней строке. */
+.chip__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--brand-ink);
+}
+
+.chip__icon img,
+.chip__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.chip__icon svg { fill: currentColor; }
+
+/* --- Projects: одна широкая панель ------------------------------------- */
+
 .panel {
   background: var(--surface);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
 
-.panel .card {
-  border-radius: 0;
-  background: transparent;
-}
+.panel > .row + .row { border-top: 1px solid var(--surface-2); }
 
-.panel .card:hover {
-  box-shadow: none;
-  transform: none;
-  background: var(--surface-2);
-}
-
-/* Кольцо фокуса на строке панели рисуется внутрь строки. Снаружи его
-   срезал бы overflow панели: первая строка теряла индикатор фокуса
-   целиком, а клавиатурный пользователь не видел, где находится. */
-.panel .card:focus-visible {
-  outline-offset: -2px;
-}
-
-/* --- best of ------------------------------------------------------------ */
-
-.years {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
-}
-
-.year__label {
-  margin: 0 0 var(--space-2);
-  font-family: var(--mono);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.result {
+.row {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
+  min-height: 56px;
+  padding: var(--space-3) var(--space-4);
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease;
 }
 
-.result__icon {
+.row:hover { background: var(--surface-2); }
+
+.row__icon {
   flex: none;
-  width: var(--space-5);
-  height: var(--space-5);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
   color: var(--accent);
 }
 
-/* Кубок и медаль отличаются не только формой, но и цветом: первое место
-   видно раньше, чем прочитан текст. */
-.result__icon--gold { color: var(--gold); }
+/* Знак внутри плитки — фиксированные 20px, а не 100% плитки.
 
-.result__icon svg { width: 100%; height: 100%; }
+   Плитка 36px, и при width: 100% глиф занимал её целиком, без отступа:
+   самолётик Telegram читался не значком в плитке, а плошкой, и был
+   заметно крупнее прочих знаков страницы. Тот же размер, что и у
+   .pill__icon, — и он по той же причине рабочий: 20px это размер
+   знака, который на странице и должен быть, а размер плитки отвечает
+   за вес блока, а не за размер глифа.
 
-.result__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-strong);
+   У .chip__icon и .spotlight__icon внутренний знак остаётся 100%: там
+   плитка сама себе знак (16px и 28px), и отступ ей не нужен — дать его
+   значило бы просто отрисовать знак вдвое мельче. Здесь плитка 36px,
+   и 20px знака внутри неё оставляют рамку в 8px с каждой стороны.
+
+   object-fit: contain оставлен: знаки разной природы (svg и растр)
+   приводятся к одному боксу, а не растягиваются под него. */
+.row__icon img,
+.row__icon svg {
+  display: block;
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
-/* Уточнение к результату: специальный раунд, год издания. Отдельной
-   строкой не выносится — это часть названия, а не соседний факт. */
-.result__note {
-  display: block;
+.row__icon svg { fill: currentColor; }
+
+/* Знак канала в фирменном цвете: он и без подписи узнаётся, а общий
+   акцент на первой строке сделал бы её просто ещё одной. */
+.row--accent .row__icon {
+  background: var(--accent-soft);
+  color: var(--tg);
+}
+
+.row__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.row__name {
+  color: var(--text-strong);
+  font-size: 1.0625rem;
+  font-weight: 500;
+}
+
+.row__note {
+  color: var(--muted);
   font-family: var(--mono);
   font-size: 0.875rem;
+}
+
+/* Кольцо фокуса на строке панели рисуется внутрь строки: снаружи его
+   срезал бы overflow панели, и первая строка потеряла бы индикатор
+   фокуса целиком.
+
+   Селектор с `.panel` — не украшение, а единственная причина, по которой
+   правило вообще работает. Общее правило фокуса ниже перечисляет
+   `.row:focus-visible` рядом с чипами и кнопками и объявляет
+   `outline-offset: 2px`. У простого `.row:focus-visible` специфичность
+   была бы такая же, (0,2,0), и побеждал бы более поздний по тексту —
+   то есть общий отступ 2px, а кольцо срезал бы overflow панели. Лишний
+   класс поднимает правило до (0,3,0) и делает отступ -2px независимым от
+   порядка правил в файле: переставить блоки местами или перенести это
+   правило выше общего больше ничего не сломает. В общий список фокуса
+   `outline-offset` для `.row` возвращать нельзя. */
+.panel .row:focus-visible { outline-offset: -2px; }
+
+/* --- best of ------------------------------------------------------------ */
+
+.spotlight {
+  background: var(--surface);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+}
+
+.spotlight__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.spotlight__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--accent);
+}
+
+.spotlight__icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.spotlight__name {
+  font-family: var(--mono);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.spotlight__note {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 
-.result__place {
-  flex: none;
+.places {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.place {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius);
   font-family: var(--mono);
   font-size: 0.875rem;
+  color: var(--text);
+}
+
+/* Год и место — атомарные подписи, и переносить их нельзя.
+
+  На 320px панель отдаёт ленте мест 238px (288 полосы минус 2px рамки и
+  48px полей), а плитка с местом занимает 208px. Флекс сжимает её, и
+  сжимается не панель, а подписи внутри: «Red Team / Scenarios» ещё
+  терпимо, а «Top / 3» — это уже не перенос, а опечатка, и плитка
+  становится вдвое выше соседних. С неразрывными подписями сжимается
+  только название площадки, и то по границе слова.
+
+  Перенос названия площадки терпим, но не решает задачи: полное «Red
+  Team Scenarios» просит с плиткой 266.8px против 238px полосы, флекс
+  сжимает плитку, и перенос падает на название — плитка 2024 становится
+  54px против 31px у соседей (замерено в браузере на 320px). Поэтому в
+  плитке стоит короткое «Red Team» (183px), а полное название унесено в
+  title того же span, где оно не борется за ширину. Вернуть полное
+  название в плитку нельзя: white-space: nowrap на .place__event убирает
+  перенос, но не ширину — плитка станет 267px и перестанет влезать в
+  ленту. Это ловит check_wrapping_tiles в tools/narrow_test.py. */
+.place__year { color: var(--muted); white-space: nowrap; }
+.place__rank { color: var(--accent); font-weight: 600; white-space: nowrap; }
+
+/* Фоновые места: приглушённая строка под панелью. Разница масштаба
+   с панелью и есть весь смысл — Standoff читается первым без
+   цветовых пятен.
+
+   `margin: 0` — не украшение, а необходимое объявление. Отступ сверху
+   должен нести контейнер: #best это .block, то есть флекс-колонка с
+   gap: var(--space-4), и своего margin у .also быть не должно, иначе он
+   сложится с gap. Но и убрать объявление целиком нельзя: .also это <p>,
+   а в файле нет сброса для p (только body { margin: 0 }), поэтому без
+   margin: 0 сверху вступает пользовательский агент — 1em, и отступ под
+   панелью становится gap плюс эти 13px вместо одного gap. `margin: 0`
+   обнуляет обе границы, и единственный отступ, который остаётся, —
+   gap контейнера; внизу он тоже не нужен, там отступ до следующего
+   блока задаёт уже сам .block. */
+.also {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.75;
   color: var(--muted);
 }
 
@@ -476,9 +633,13 @@ main {
 
 /* --- Фокус -------------------------------------------------------------- */
 
-/* Спека §7: 2px цветом акцента на всех интерактивах. */
+/* Спека §7: 2px цветом акцента на всех интерактивах. Отступ 2px — для
+   всех, кроме строк панели projects: их кольцо уходит внутрь строки, и
+   это переопределяет правило `.panel .row:focus-visible` повышенной
+   специфичности. */
 .pill:focus-visible,
-.card:focus-visible,
+.chip:focus-visible,
+.row:focus-visible,
 .fact__link:focus-visible,
 .theme-toggle:focus-visible {
   outline: 2px solid var(--accent);
@@ -487,11 +648,38 @@ main {
 
 /* --- Мобильный < 640px -------------------------------------------------- */
 
-/* Спека §6: колонок нет нигде, ломаться нечему. Аватар над именем,
-   CTA в две строки — пилюли тянутся на всю ширину, min-height 44px
-   держит тап. Отступы секций сползают к нижней границе clamp() сами,
-   отдельного правила для них не нужно. */
+/* Спека §2.2 и §6: ниже 640px — одна колонка в порядке DOM. Области
+   перечислены явно, а не сброшены в auto: порядок чтения обязан быть
+   виден в коде, иначе возвращение порядка в DOM не заметит ни один
+   прогон. Отступы секций сползают к нижней границе clamp() сами.
+
+   Нижняя граница --space-section после правки 2026-10-09 — 3rem, то есть
+   48px на телефоне против прежних 64px: seam стал плотнее, но не схлопнулся
+   в ноль (замерено в браузере на 320px). Поэтому поля обёртки здесь
+   оставлены на --space-5 (24px), а не опущены до --space-3: 24 и 48 —
+   два порядка, и низ страницы не прилипает к краю окна. */
 @media (max-width: 640px) {
+  main {
+    grid-template-areas:
+      'about'
+      'projects'
+      'best'
+      'elsewhere';
+    grid-template-columns: 1fr;
+  }
+
+  #about    { margin-block-end: var(--space-section); }
+  #projects { margin-block-end: var(--space-section); }
+
+  /* У best на широком экране отступ сверху: он третий ряд и отделён от
+     верхних блоков. В одной колонке над ним стоит projects, который уже
+     отодвинут своим margin-block-end, а поля в гриде не схлопываются —
+     без сброса промежуток projects → best вышел бы вдвое больше всех
+     остальных. Сброс полный (0 сверху), а не уменьшение до --space-5:
+     снизу best и так отодвинут своим --space-section, и на 320px это
+     48px — ещё 48 сверху дали бы дыру в 96px подряд. */
+  #best     { margin-block: 0 var(--space-section); }
+
   .hero__id {
     flex-direction: column;
     align-items: flex-start;
@@ -509,11 +697,14 @@ main {
 /* --- Reduced motion ----------------------------------------------------- */
 
 /* Спека §7: движение при вестибулярных нарушениях — не украшение, а
-   помеха, поэтому подъём карточек выключается. Мигающего курсора на
-   странице больше нет, выключать нечего. */
+   помеха, поэтому выключаются переходы. Подъёма на ховере на странице
+   больше нет: он ушёл вместе с круглыми карточками и тенью, а отклик
+   дают рамка и цвет. Гасить нечего, поэтому transform здесь не
+   упоминается — иначе правило охраняло бы пустоту. Переходы при этом
+   остались: строка панели projects меняет фон под курсором, как чип —
+   цвет и рамку. */
 @media (prefers-reduced-motion: reduce) {
-  .pill, .card, .theme-toggle, .fact__link { transition: none; }
-  .pill:hover, .card:hover { transform: none; }
+  .pill, .chip, .row, .theme-toggle, .fact__link { transition: none; }
 }
 
 /* --- Печать ------------------------------------------------------------- */
@@ -533,7 +724,6 @@ main {
     --border: #BBBBBB;
     --accent: #0369A1;
     --signal: #166534;
-    --gold: #8F6419;
 
     /* Фирменные знаки печатались белилами по белому и просто исчезали:
        --brand-ink в тёмной теме это #FFFFFF, и на бумаге он неотличим
@@ -543,19 +733,57 @@ main {
     --brand-ink: #000000;
     --tg: #157BAE;
     --accent-soft: #FFFFFF;
-
-    --shadow: none;
   }
 
   body { background: #FFFFFF; }
 
-  .hero,
-  .card,
-  .result,
-  .panel {
-    box-shadow: none;
-    break-inside: avoid;
+  /* Спека §7: на листе одна колонка в порядке чтения. Области названы
+     явно, а не сброшены в auto — иначе возвращение двух колонок на
+     печати не заметил бы ни один прогон. */
+  main {
+    grid-template-areas:
+      'about'
+      'projects'
+      'best'
+      'elsewhere';
+    grid-template-columns: 1fr;
   }
+
+  #about, #projects, #best { margin-block-end: var(--space-5); }
+
+  /* У best сверху есть отступ, и он не от кого-то: широкая раскладка
+     отодвигает третий ряд от двух верхних, потому что projects тянется
+     на оба ряда правой колонки. На листе в одну колонку этого
+     родства нет, а поле остаётся: медиа-условия не складываются,
+     блок 640px на A4 (794px) и Letter (816px) не действует вовсе.
+     Поля в гриде не схлопываются, поэтому промежуток projects → best
+     сложился бы из двух — своего margin-block-end и чужого margin-block-start
+     у best — и стал бы вдвое шире соседних.
+
+     Числа в пояснении пришлось переписать вместе со шкалой 2026-10-09:
+     --space-section теперь clamp(3rem, 6vw, 4.5rem), то есть 48px на A4
+     (было 79px), и дыра над панелью Standoff вышла 72px против 24px у
+     остальных промежутков на бумаге — тройка, а не четверка. Правило
+     осталось: печатный блок под @media 640px не попадает, и снимать
+     margin-block-start у best обязан он сам. */
+  #best { margin-block-start: 0; }
+
+  /* Скругление панели держится на обрезании: на бумаге углы должны быть
+     прямыми, и панель обязана отдать этот угол содержимому строк. */
+  .panel {
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .spotlight { border-radius: 0; }
+
+  /* Блок не должен рваться пополам между страницами. Тени на странице нет
+     (--shadow убран редизайном), поэтому правило охраняет только разрыв. */
+  .hero,
+  .chip,
+  .row,
+  .spotlight,
+  .panel { break-inside: avoid; }
 
   .theme-toggle { display: none; }
 
@@ -563,5 +791,25 @@ main {
     content: " (" attr(href) ")";
     font-size: 0.75em;
     color: #555555;
+  }
+
+  /* Адрес в конце ссылки должен помещаться на лист любого размера, а
+     правило выше печатает его у КАЖДОЙ ссылки, включая чипы. На экране
+     чип помещается в полосу, на бумаге — нет: .chip объявлен
+     white-space: nowrap, а самый широкий адрес (max.ru/join/…) даёт
+     вместе с подписью около 665px против 527px полосы A5 и 289px
+     полосы визитки 85 мм. A4 проходит случайно, и до первого
+     распечатанного черновика это не видно: на превью страница
+     выглядит рабочей, а на бумаге вылезает за поля.
+
+     Перенос — правильное решение, а не скрытие адреса: визитку
+     печатают именно потому, что её потом отдают в руки, и адрес
+     max.ru/join/… на карточке нужен больше, чем его целостность в одну
+     строку. overflow-wrap: anywhere нужен отдельно от
+     white-space: normal — в адресе нет пробелов, и по ним одним он не
+     переносится ни при каком normal. */
+  .chip {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
