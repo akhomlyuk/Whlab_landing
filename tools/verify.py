@@ -253,12 +253,17 @@ def check_content_is_static() -> None:
     # projects поднимается над elsewhere: это самые кликабельные ссылки
     # страницы, и на телефоне до них должен быть один прокрут, а не три.
     #
-    # В списке классов секции допускаются модификаторы: `class="block[^"]*"`,
+    # В списке классов секции допускаются модификаторы: `class="block(?:\s[^"]*)?"`,
     # а не `class="block"`. Блок --panel (у блоков с тяжёлой панелью) —
     # ровно такой модификатор, и точное совпадение перестало бы находить
     # projects вовсе: раздел молча выпал бы из проверки порядка, а страница
     # осталась бы выглядеть рабочей.
-    order = [m.group(1) for m in re.finditer(r'<section class="block[^"]*" id="([a-z]+)">', html)]
+    #
+    # Форма именно такая, а не `class="block[^"]*"`: последняя согласилась
+    # бы и на `class="blocks"`, то есть засчитала бы чужой класс как
+    # секцию — и порядок разделов упал бы с сообщением, от которого до
+    # причины далеко. Модификатор отделяется пробелом, и ничего больше.
+    order = [m.group(1) for m in re.finditer(r'<section class="block(?:\s[^"]*)?" id="([a-z]+)">', html)]
     if order != ["about", "projects", "best", "elsewhere"]:
         errors.append(
             f"index.html: порядок разделов {order}, ожидался "
@@ -349,11 +354,11 @@ def check_project_icons() -> None:
     html = read_if_present("index.html")
     if html is None:
         return
-    # Классы секции ищутся как `class="block[^"]*"`: у projects в списке
+    # Классы секции ищутся как `class="block(?:\s[^"]*)?"`: у projects в списке
     # есть модификатор --panel, и точное `class="block"` не нашло бы
     # раздел — проверка упала бы «не найден раздел projects» на вполне
-    # годной разметке.
-    m = re.search(r'<section class="block[^"]*" id="projects">(.*?)</section>', html, re.S)
+    # годной разметке. Форма с `\s` отсекает подставные `class="blocks"`.
+    m = re.search(r'<section class="block(?:\s[^"]*)?" id="projects">(.*?)</section>', html, re.S)
     if m is None:
         errors.append("index.html: не найден раздел projects")
         return
@@ -737,10 +742,19 @@ CONTRAST_PAIRS = (
     # техническая: --accent-soft это rgba(), а сравнение ниже пропускает
     # любое значение, не начинающееся с «#». Пара с ним была бы
     # vacuously верной в обеих темах — проверка молча соглашалась бы с
-    # чем угодно. Реальные числа на композите (--tg поверх --accent-soft
-    # поверх --surface): 4.96:1 в тёмной и 4.13:1 в светлой, оба выше
-    # порога графики 3:1. Знак канала в фирменном синем на голубой
-    # плитке акцентной строки панели защищён этими числами, а не списком.
+    # чем угодно. Настоящая подложка знака — это композиция --accent-soft
+    # поверх фона строки, и именно поэтому пара в список не годится: фон
+    # строки меняется (ховер даёт --surface-2), так что подложек две, а
+    # проверить их обе проверка не умеет. На ховере плитка знака к тому же
+    # остаётся на --accent-soft: `.row--accent .row__icon` с (0,2,0)
+    # перебивает `.row__icon` с (0,1,0). Числа на 8-битном композите
+    # (round каналов перед подсчётом):
+    #   тёмная   --accent-soft 0.14 на --surface   #0F1620 = #152D3E -> 4.71:1
+    #   тёмная   --accent-soft 0.14 на --surface-2 #151E2A = #1A3447 -> 4.28:1
+    #   светлая  --accent-soft 0.10 на --surface   #FFFFFF = #E6F0F6 -> 4.06:1
+    #   светлая  --accent-soft 0.10 на --surface-2 #EDF2F7 = #D6E4EE -> 3.62:1
+    # Все четыре выше порога графики 3:1. Держат знак канала существующие
+    # пары (--tg, --surface) и (--tg, --surface-2) — обе настоящие.
 )
 
 
@@ -807,7 +821,7 @@ def check_link_placement() -> None:
     # Модификаторы в списке классов секции допускаются — та же причина,
     # что в check_project_icons: у projects есть `block--panel`.
     def section(name: str) -> str | None:
-        m = re.search(rf'<section class="block[^"]*" id="{name}">(.*?)</section>', html, re.DOTALL)
+        m = re.search(rf'<section class="block(?:\s[^"]*)?" id="{name}">(.*?)</section>', html, re.DOTALL)
         if m is None:
             errors.append(f"index.html: не найден раздел {name}")
             return None
@@ -870,7 +884,11 @@ def check_chips() -> None:
     if html is None:
         return
 
-    m = re.search(r'<section class="block" id="elsewhere">(.*?)</section>', html, re.DOTALL)
+    # Та же форма, что в остальных местах файла: `elsewhere` сегодня без
+    # модификаторов и точное `class="block"` срабатывает, но владелец
+    # вправе повесить на него класс так же, как повесил `block--panel` на
+    # projects, — и проверка молча перестала бы находить раздел.
+    m = re.search(r'<section class="block(?:\s[^"]*)?" id="elsewhere">(.*?)</section>', html, re.DOTALL)
     if m is None:
         errors.append("index.html: не найден раздел elsewhere")
         return
