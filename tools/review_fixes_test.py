@@ -279,54 +279,57 @@ def test_print_overrides_brand_colors() -> None:
     )
 
 
-# --- Дефект 4: знак на акцентной кнопке снова стал бы синим по синему ----
+# --- Дефект 4 (отменён решением владельца): акцентной кнопки в шапке нет ---
 
-def test_accent_pill_icon_inherits() -> None:
-    """Знак на .pill--accent обязан наследовать её цвет, а не быть --tg.
+def test_no_accent_pill() -> None:
+    """В шапке не должно быть акцентной кнопки — решение владельца.
 
-    Глиф главного перехода на канал ложился --tg на --accent: 1.26:1 в
-    светлой теме и 1.41:1 в тёмной — вчетверо ниже порога графики, то
-    есть знак просто исчезал. Причина была в каскаде, а не в палитре:
-    класс висит на внутреннем <span>, и правило с --tg перебивало
-    наследование от кнопки.
+    Здесь стоял прежде обратный тест: `.pill--accent .pill__icon` обязан был
+    объявлять color: inherit, иначе знак Telegram ложился --tg на --accent
+    (1.26:1 в светлой теме, 1.41:1 в тёмной) и просто исчезал. Дефект был
+    настоящим — но чинился он двумя способами, и владелец выбрал второй:
+    2026-10-09, посмотрев собранную страницу, он сказал «не надо ее синим
+    выделять». Обе ссылки в шапке теперь оформлены одинаково, акцентной
+    кнопки на странице нет, а значит нет и каскада, который чинился.
 
-    Проверка спрашивает не «есть ли где-то color: inherit», а что
-    РЕШАЕТ каскад для .pill--accent .pill__icon: побеждает последнее
-    объявление для этой пары «селектор + свойство». Иначе откат правила
-    к `color: var(--tg)` проходил бы молча — а это ровно тот баг,
-    ради которого правило и написано, и возврат его стоит одного
-    символа в правке.
+    Тест, охраняющий несуществующий селектор, охраняет пустоту: он падал бы
+    ровно на правильном коде и молчал бы на неправильном — ровно то, от чего
+    отказались в check_reduced_motion с требованием transform: none. Поэтому
+    на его месте стоит проверка нового решения, а новым решением здесь
+    называется не «теста нет», а «голубой фон сюда не вернётся»: ни
+    классом на ссылке, ни правилом в CSS.
     """
+    html = read("index.html")
     css = read("css/style.css")
-    rules = _rules(css)
 
-    winner: tuple[bool, tuple[int, int, int], int, str] | None = None
-    where = "—"
-    for _media, order, selector, body in rules:
-        value = _declared(body, "color")
-        if value is None:
+    hero = re.search(r'<header class="hero">(.*?)</header>', html, re.DOTALL)
+    if hero is None:
+        check(
+            "no accent pill in hero",
+            False,
+            'не найден <header class="hero"> — проверять нечего',
+        )
+    else:
+        check(
+            "no accent pill in hero",
+            "pill--accent" not in hero.group(1),
+            "у ссылки Telegram в шапке снова класс pill--accent — владелец "
+            "2026-10-09 решил, что выделять её синим не надо",
+        )
+
+    painted = []
+    for _media, _order, selector, body in _rules(css):
+        if _declared(body, "background") != "var(--accent)":
             continue
         for part in selector.split(","):
             part = " ".join(part.split())
-            # Селектор должен быть именно про знак ВНУТРИ акцентной
-            # кнопки. Простое `.pill__icon` не годится: оно и есть
-            # правило, которое перебивалось.
-            if _subject_of(part) != ".pill__icon":
-                continue
-            if not re.search(r"(^|\s)\.pill--accent(\s|$)", part):
-                continue
-            candidate = ("!important" in body, _specificity(part), order, value)
-            if winner is None or candidate[:3] > winner[:3]:
-                winner = candidate
-                where = f"{part} (правило №{order})"
-
+            if re.search(r"(^|[\s>+~])\.pill(\s|$|:)", part):
+                painted.append(part)
     check(
-        "accent pill icon inherits color",
-        winner is not None and winner[3] == "inherit",
-        "у .pill--accent .pill__icon нет color: inherit"
-        + (f", побеждает {where} со значением {winner[3]}" if winner else "")
-        + " — --tg на --accent даёт 1.26:1, и знак главного перехода "
-        "на канал исчезает с кнопки",
+        "no accent pill background in CSS",
+        not painted,
+        f"фоном var(--accent) красятся: {', '.join(sorted(set(painted)))} — "
+        "акцентная кнопка в шапке отменена решением владельца от 2026-10-09",
     )
 
 
@@ -378,7 +381,7 @@ def main() -> int:
     test_panel_focus_not_clipped()
     test_print_overrides_brand_colors()
     test_contrast_pairs_cover_actual_usage()
-    test_accent_pill_icon_inherits()
+    test_no_accent_pill()
 
     for p in passes:
         print(f"  PASS: {p}")
