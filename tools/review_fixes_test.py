@@ -279,6 +279,57 @@ def test_print_overrides_brand_colors() -> None:
     )
 
 
+# --- Дефект 4: знак на акцентной кнопке снова стал бы синим по синему ----
+
+def test_accent_pill_icon_inherits() -> None:
+    """Знак на .pill--accent обязан наследовать её цвет, а не быть --tg.
+
+    Глиф главного перехода на канал ложился --tg на --accent: 1.26:1 в
+    светлой теме и 1.41:1 в тёмной — вчетверо ниже порога графики, то
+    есть знак просто исчезал. Причина была в каскаде, а не в палитре:
+    класс висит на внутреннем <span>, и правило с --tg перебивало
+    наследование от кнопки.
+
+    Проверка спрашивает не «есть ли где-то color: inherit», а что
+    РЕШАЕТ каскад для .pill--accent .pill__icon: побеждает последнее
+    объявление для этой пары «селектор + свойство». Иначе откат правила
+    к `color: var(--tg)` проходил бы молча — а это ровно тот баг,
+    ради которого правило и написано, и возврат его стоит одного
+    символа в правке.
+    """
+    css = read("css/style.css")
+    rules = _rules(css)
+
+    winner: tuple[bool, tuple[int, int, int], int, str] | None = None
+    where = "—"
+    for _media, order, selector, body in rules:
+        value = _declared(body, "color")
+        if value is None:
+            continue
+        for part in selector.split(","):
+            part = " ".join(part.split())
+            # Селектор должен быть именно про знак ВНУТРИ акцентной
+            # кнопки. Простое `.pill__icon` не годится: оно и есть
+            # правило, которое перебивалось.
+            if _subject_of(part) != ".pill__icon":
+                continue
+            if not re.search(r"(^|\s)\.pill--accent(\s|$)", part):
+                continue
+            candidate = ("!important" in body, _specificity(part), order, value)
+            if winner is None or candidate[:3] > winner[:3]:
+                winner = candidate
+                where = f"{part} (правило №{order})"
+
+    check(
+        "accent pill icon inherits color",
+        winner is not None and winner[3] == "inherit",
+        "у .pill--accent .pill__icon нет color: inherit"
+        + (f", побеждает {where} со значением {winner[3]}" if winner else "")
+        + " — --tg на --accent даёт 1.26:1, и знак главного перехода "
+        "на канал исчезает с кнопки",
+    )
+
+
 # --- Дефект 3: сеть контрастных пар дырявая -------------------------------
 
 def test_contrast_pairs_cover_actual_usage() -> None:
@@ -327,6 +378,7 @@ def main() -> int:
     test_panel_focus_not_clipped()
     test_print_overrides_brand_colors()
     test_contrast_pairs_cover_actual_usage()
+    test_accent_pill_icon_inherits()
 
     for p in passes:
         print(f"  PASS: {p}")
