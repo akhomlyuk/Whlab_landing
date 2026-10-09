@@ -93,20 +93,26 @@ def _winning_offset(rules) -> float | None:
     отвечает специфичность. Если бы специфичности у правила не было,
     побеждал бы общий отступ 2px, а правило с -2px так и осталось бы
     мёртвым — присутствующим в файле и ни на что не влияющим.
+
+    !important поднимается над специфичностью — это единственное
+    объявление, которое перебивает (0,3,0), и пропустить его молча
+    означало бы вернуть обрезанное кольцо под видом защищённого.
     """
-    best: tuple[tuple[int, int, int], int, float] | None = None
+    best: tuple[bool, tuple[int, int, int], int, float] | None = None
     for order, selector, body in rules:
-        m = re.search(r"(?<![\w-])outline-offset\s*:\s*(-?[\d.]+)px", body)
+        m = re.search(
+            r"(?<![\w-])outline-offset\s*:\s*(-?[\d.]+)px\s*(!important)?", body
+        )
         if m is None:
             continue
         for part in selector.split(","):
             part = " ".join(part.split())
             if ".row:focus-visible" not in part:
                 continue
-            candidate = (_specificity(part), order, float(m.group(1)))
-            if best is None or candidate[:2] > best[:2]:
+            candidate = (bool(m.group(2)), _specificity(part), order, float(m.group(1)))
+            if best is None or candidate[:3] > best[:3]:
                 best = candidate
-    return best[2] if best else None
+    return best[3] if best else None
 
 
 def test_panel_focus_not_clipped() -> None:
