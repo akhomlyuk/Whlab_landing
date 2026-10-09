@@ -779,11 +779,55 @@ def _grid_area_rows(css: str) -> list[list[str]]:
     проверка не должна ломаться от их смены на двойные — регулярка
     принимает и те, и другие. Объявление обрывается точкой с запятой, а
     не переводом строки, поэтому многострочная запись разбирается целиком.
+
+    Комментарии вырезаются: `grid-template-areas` в пояснении выглядит
+    для регулярки как объявление и тянет за собой следующую строку
+    области (та же причина, что в block_of в check_contrast_pairs).
     """
+    clean = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
     rows: list[list[str]] = []
-    for decl in re.findall(r"grid-template-areas\s*:(.*?);", css, re.DOTALL):
+    for decl in re.findall(r"grid-template-areas\s*:(.*?);", clean, re.DOTALL):
         rows.extend(row.split() for row in re.findall(r"['\"]([^'\"]*)['\"]", decl))
     return rows
+
+
+def _wide_layout_css(css: str) -> str:
+    """Кусок CSS без содержимого @media — то, что рисуется без оговорок.
+
+    Широкая раскладка интересует проверку ровно одна: та, что действует
+    без медиа-условий. Всё, что лежит внутри @media, — откаты, и области
+    там одноимённые с широкими: @media (max-width: 640px) перестраивает
+    их в одну колонку, @media print схлопывает страницу на бумагу. Если
+    считать строки по всему файлу, то с появлением первого же отката
+    панель projects начинает занимать «три ряда из семи», и проверка
+    роняет корректную раскладку — виня широкие области в том, что они
+    объявлены ещё и там.
+
+    Вырезается содержимое ЛЮБОГО @media, а не только 640px: список
+    откатов будет расти, а проверка — нет. Вложенные медиа-блоки (@media
+    внутри @media) не встречаются и не ожидаются; на их месте цикл
+    вырежет внешний блок целиком, вместе со вложенным, — а это ровно то
+    поведение, которое нужно: лишние области не попадут в счёт.
+
+    Побочный плюс: комментарии и правила @media остаются в файле, и
+    объявление grid-template-areas внутри вложенного селектора не может
+    подделать широкую раскладку.
+    """
+    out = css
+    while True:
+        m = re.search(r"@media\b[^{]*\{", out)
+        if m is None:
+            return out
+        # Идём по балансу скобок от открытой до её парной.
+        depth = 1
+        i = m.end()
+        while i < len(out) and depth:
+            if out[i] == "{":
+                depth += 1
+            elif out[i] == "}":
+                depth -= 1
+            i += 1
+        out = out[:m.start()] + out[i:]
 
 
 def check_two_column_layout() -> None:
@@ -801,6 +845,16 @@ def check_two_column_layout() -> None:
     «перестроенные» области при оставшихся 1fr 1.25fr дают телефону
     либо две колонки, либо трек шириной во весь экран — и обе ошибки
     раньше проходили молча.
+
+    ДОГОВОРЁННОСТЬ С TASK 4 (это его приёмка, а не украшение):
+    внутри @media (max-width: 640px) обязаны быть
+      grid-template-areas: 'about' 'projects' 'elsewhere' 'best'
+                          — одним именем в строке, четыре строки;
+      grid-template-columns: 1fr;   — 1fr или none, но не 1fr 1.25fr.
+    Откат в @media (max-width: 640px) проверяется отдельно от широкой
+    раскладки: широкие области читаются из файла за вычетом содержимого
+    ЛЮБОГО @media (см. _wide_layout_css), поэтому добавление отката —
+    печать в Task 8, — не сдвинет счёт строк в широкой половине.
     """
     css = read_if_present("css/style.css")
     html = read_if_present("index.html")
@@ -813,16 +867,18 @@ def check_two_column_layout() -> None:
 
     media = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.DOTALL)
 
-    # Широкая раскладка читается из файла за вычетом медиа-блока: как
-    # только Task 4 допишет в него свои области, они окажутся одноимёнными
-    # с широкими, и счёт «панель тянется на обе строки» посчитал бы и их —
-    # сломав ровно ту проверку, которая объясняет, зачем areas нужны.
-    wide = css if media is None else css[:media.start()] + css[media.end():]
-    rows = _grid_area_rows(wide)
+    # Широкая раскладка — только то, что рисуется без медиа-условий.
+    # Откаты (@media 640px в Task 4, @media print в Task 8) объявляют те
+    # же имена областей, и в общем счёте они выглядели бы как «панель
+    # занимает три ряда из семи»: проверка роняла бы правильную страницу
+    # и винила широкие области в том, что они объявлены ещё где-то.
+    rows = _grid_area_rows(_wide_layout_css(css))
+    wide_ok = True
 
     names = {name for row in rows for name in row}
     for area in ("about", "projects", "elsewhere", "best"):
         if area not in names:
+            wide_ok = False
             errors.append(f"style.css: область {area!r} не объявлена в grid-template-areas")
 
     # Панель обязана стоять в обоих рядах правой колонки, иначе about и
@@ -832,6 +888,7 @@ def check_two_column_layout() -> None:
     # рабочей, а grid-area: projects на месте — и проверка молчит.
     spanned = sum("projects" in row for row in rows)
     if spanned != 2:
+        wide_ok = False
         errors.append(
             "style.css: projects не тянется на обе строки правой колонки — "
             f"ожидалось два ряда с projects, в области их {spanned} из {len(rows)}"
@@ -841,6 +898,7 @@ def check_two_column_layout() -> None:
     # ячейки, а без явного закрепления #projects авторазмещение положило бы
     # панель в первую свободную — левую — ячейку.
     if not re.search(r"grid-area:\s*projects", css):
+        wide_ok = False
         errors.append("style.css: нет grid-area: projects — панель не закреплена в правой колонке")
 
     # Медиа-откат: без него телефон получает две колонки. Договорённость с
@@ -870,10 +928,11 @@ def check_two_column_layout() -> None:
     if html is not None and html.count('id="projects"') != 1:
         errors.append('index.html: раздел projects должен быть ровно один')
 
-    # Заметка — только когда обе половины сошлись. Без этого прогон печатал
-    # «медиа-откат на месте» в одной строке с «ОШИБКА: @media 640px:
-    # области не перестроены», то есть отмашку, которой не было.
-    if narrow_ok:
+    # Заметка — только когда сошлись обе половины, широкая и узкая. Без
+    # этого прогон печатал «медиа-откат на месте» рядом с «ОШИБКА:
+    # @media 640px: области не перестроены», а «области объявлены» — рядом
+    # с «область 'best' не объявлена»: отмашка, которой не было.
+    if wide_ok and narrow_ok:
         notes.append("Раскладка: области объявлены, медиа-откат на месте")
 
 
