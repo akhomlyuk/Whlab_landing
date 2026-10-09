@@ -128,14 +128,13 @@ REQUIRED_TEXT = (
     # требовала бы от автора убрать ссылку из факта.
     "Постоянный участник и призёр",
     "Standoff 365",
-    "Автор канала",
     "Атаки на Active Directory",
     "MAX",
     "GitHub",
     "Hackerlab",
     "IT Movies",
     "Whitehat Lab stats",
-    "CTF площадки",
+    "CTF-площадки",
     "Standoff 17",
     "Standoff 15",
     "Standoff 12",
@@ -165,15 +164,11 @@ FORBIDDEN_TEXT = (
     # что снятие запрета владельца — это решение, а не молчаливое
     # упрощение списка при правке.
     "пентест, форензика",
-)
-
-# Эти две убраны именно с карточек в разделе elsewhere. В meta description
-# фраза «Telegram-канал о технологиях и ИИ» остаётся: там она описывает
-# страницу для поиска и убирать её значило бы потерять сведения. Поэтому
-# проверка смотрит в карточки, а не в документ целиком.
-FORBIDDEN_IN_CARDS = (
-    "Telegram-канал о технологиях",
-    "Профиль на киберполигоне",
+    # Факт про канал убран 2026-10-09: канал стал первой карточкой
+    # projects, и два упоминания на одном экране — это повтор.
+    "Автор канала",
+    # Подпись команды убрана решением владельца: FR13NDS остаётся ссылкой.
+    "моя команда",
 )
 
 
@@ -224,14 +219,6 @@ def check_content_is_static() -> None:
     for needle in FORBIDDEN_TEXT:
         if needle in html:
             errors.append(f"index.html: текст {needle!r} удалён по решению владельца, но вернулся")
-
-    elsewhere = re.search(r'<section class="block" id="elsewhere">(.*?)</section>', html, re.S)
-    if elsewhere is None:
-        errors.append("index.html: не найден раздел elsewhere")
-    else:
-        for needle in FORBIDDEN_IN_CARDS:
-            if needle in elsewhere.group(1):
-                errors.append(f"index.html: подпись {needle!r} удалена с карточки, но вернулась")
 
     # Разметка внутри атрибута: d="<path ...". Браузер такое значение
     # игнорирует, иконка просто не рисуется — страница при этом выглядит
@@ -341,21 +328,21 @@ def check_project_icons() -> None:
         errors.append("index.html: не найден раздел projects")
         return
     block = m.group(1)
-    cards = re.findall(r'<a class="card".*?</a>', block, re.S)
-    if not cards:
-        errors.append("projects: карточек нет")
+    rows = re.findall(r'<a class="row".*?</a>', block, re.S)
+    if not rows:
+        errors.append("projects: строк нет")
         return
-    with_icon = [c for c in cards if ("card__icon" in c)]
-    if len(with_icon) != len(cards):
+    with_icon = [c for c in rows if ("row__icon" in c)]
+    if len(with_icon) != len(rows):
         errors.append(
-            f"projects: иконка есть только у {len(with_icon)} из {len(cards)} карточек — "
+            f"projects: иконка есть только у {len(with_icon)} из {len(rows)} строк — "
             "у каждого проекта своя favicon"
         )
     for c in with_icon:
         for url in re.findall(r'src="([^"]+)"', c):
             if not (ROOT / url).exists():
                 errors.append(f"projects: иконка не найдена на диске: {url}")
-    notes.append(f"Карточек проектов с иконкой: {len(with_icon)} из {len(cards)}")
+    notes.append(f"Строк проектов с иконкой: {len(with_icon)} из {len(rows)}")
 
 
 def check_internal_links() -> None:
@@ -750,11 +737,63 @@ def check_contrast_pairs() -> None:
 def check_link_placement() -> None:
     """Ссылки живут там, куда их поместили, а не где попалось.
 
-    Standoff 365 переехал в about как факт биографии, Telegram остался
-    в hero CTA и about. В ленте ссылок обеих быть не должно: карточка
-    со ссылкой рядом с тем же фактом в about читается как повтор.
+    Спека §3.4: переход на канал — главная причина прийти, поэтому
+    t.me/wh_lab обязан быть и в шапке, и первой карточкой projects.
+    Standoff 365 остаётся ссылкой внутри факта в about.
     """
     html = read_if_present("index.html")
+    if html is None:
+        return
+
+    def section(name: str) -> str | None:
+        m = re.search(rf'<section class="block" id="{name}">(.*?)</section>', html, re.DOTALL)
+        if m is None:
+            errors.append(f"index.html: не найден раздел {name}")
+            return None
+        return m.group(1)
+
+    about = section("about")
+    projects = section("projects")
+    elsewhere = section("elsewhere")
+    if about is None or projects is None or elsewhere is None:
+        return
+
+    if "standoff365.com/profile/Exited3n/" not in about:
+        errors.append("about: нет ссылки на профиль Standoff 365 — факт должен быть кликабельным")
+    if about.count("t.me/wh_lab"):
+        errors.append("about: ссылка на канал вернулась — канал живёт в шапке и в projects")
+
+    if "t.me/wh_lab" not in projects:
+        errors.append("projects: нет карточки Whitehat Lab — главный переход на канал исчез")
+
+    # Дубль ссылки обязателен, но пара «где именно» у каждой своя, и
+    # требовать обе в elsewhere было бы противоречием: канал живёт в
+    # шапке и в projects, а не в ленте ссылок, — ровно это и написано в
+    # докстринге выше. Поэтому elsewhere проверяется только у той
+    # ссылки, которая по контракту там стоит, а обе обязаны
+    # встретиться на странице дважды.
+    if "github.com/akhomlyuk" not in elsewhere:
+        errors.append("elsewhere: нет ссылки github.com/akhomlyuk")
+
+    for url, where in (
+        ("t.me/wh_lab", "в шапке и в projects"),
+        ("github.com/akhomlyuk", "в шапке и в ленте ссылок"),
+    ):
+        if html.count(url) < 2:
+            errors.append(f"index.html: {url} должна быть и {where}")
+
+    notes.append("Ссылки: шапка, about, projects и elsewhere проверены")
+
+
+def check_chips() -> None:
+    """Лента ссылок — чипы по ширине содержимого, и у каждого своя иконка.
+
+    Сетка фиксированной ширины ломалась бы при добавлении пятой ссылки:
+    владелец прямо сказал, что будет её добавлять. Чипы на flex-wrap
+    занимают ровно свою ширину, а новая ссылка сама встаёт в конец строки.
+    """
+    html = read_if_present("index.html")
+    css = read_if_present("css/style.css")
     if html is None:
         return
 
@@ -762,26 +801,23 @@ def check_link_placement() -> None:
     if m is None:
         errors.append("index.html: не найден раздел elsewhere")
         return
-    elsewhere = m.group(1)
+    block = m.group(1)
 
-    for label, url in (
-        ("Standoff 365", "standoff365.com/profile/Exited3n/"),
-        ("Whitehat Lab", "t.me/wh_lab"),
-    ):
-        if url in elsewhere:
-            errors.append(
-                f"elsewhere: карточка «{label}» вернулась в ленту ссылок — "
-                f"она живёт в about, дублирование не читается"
-            )
+    chips = re.findall(r'<a class="chip".*?</a>', block, re.S)
+    if len(chips) < 4:
+        errors.append(f"elsewhere: чипов {len(chips)}, ожидалось минимум 4")
+    for c in chips:
+        if "chip__icon" not in c:
+            errors.append("elsewhere: чип без иконки")
 
-    about = re.search(r'<section class="block" id="about">(.*?)</section>', html, re.DOTALL)
-    if about is None:
-        errors.append("index.html: не найден раздел about")
-        return
-    for url in ("standoff365.com/profile/Exited3n/", "t.me/wh_lab"):
-        if url not in about.group(1):
-            errors.append(f"about: нет ссылки {url} — факт должен быть кликабельным")
-    notes.append("Ссылки: about и elsewhere проверены")
+    if css is not None:
+        chips_rule = re.search(r"\.chips\s*\{(.*?)\}", css, re.DOTALL)
+        if chips_rule is None:
+            errors.append("style.css: нет правила .chips")
+        elif "flex-wrap" not in chips_rule.group(1):
+            errors.append("style.css: .chips без flex-wrap — длинная ссылка не перенесётся, а новая сломает строку")
+
+    notes.append(f"Чипов в ленте ссылок: {len(chips)}")
 
 
 def check_footer() -> None:
@@ -1090,6 +1126,7 @@ def main() -> int:
     check_font_charset_coverage()
     check_contrast_pairs()
     check_link_placement()
+    check_chips()
     check_footer()
     check_two_column_layout()
     check_hero()

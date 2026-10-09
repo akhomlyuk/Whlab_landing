@@ -113,26 +113,39 @@ body {
 
 /* --- CTA-пилюли -------------------------------------------------------- */
 
-/* Спека §5: тап не меньше 44px, поэтому min-height, а не padding —
-   на длинной подписи он бы сжался. */
+/* Прямоугольник с небольшим радиусом, а не пилюля: под именем две
+   ссылки-подписи, и круглые торцы делали ряд из них похожим на
+   декоративную ленту. --radius достаточно, он же отдаёт кнопке вид,
+   согласованный с плитками. */
 .pill {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   min-height: 44px;
   padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--text-strong);
   font-weight: 500;
   text-decoration: none;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .pill:hover {
-  box-shadow: var(--shadow);
-  transform: translateY(-2px);
+  border-color: var(--signal);
 }
+
+/* Telegram остаётся акцентной кнопкой: это ведущий переход на канал,
+   ради которого страница существует. Второстепенные ссылки приглушены. */
+.pill--accent {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+
+.pill--accent:hover { border-color: var(--signal); }
 
 .pill__icon {
   flex: none;
@@ -244,132 +257,66 @@ main {
   outline-offset: 2px;
 }
 
-/* --- Карточки ---------------------------------------------------------- */
+/* --- Чипы: лента ссылок ------------------------------------------------- */
 
-.cards {
+/* Ширина по содержимому, а не сетка. Владелец добавляет ссылки, и
+   фиксированная сетка ломалась бы на каждой новой: чип на flex-wrap
+   занимает ровно свою ширину, новая ссылка встаёт в конец строки или
+   переносится. На узком экране чипы перестают помещаться и сами уходят
+   в столбик — отдельное медиа-правило не нужно. */
+.chips {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
-.cards__item { display: block; }
+/* li без своего бокса: иначе flex-строка получит лишний слой, и
+   перенос чипов будет считаться по ширине li, а не по ссылке. */
+.chips > li { display: contents; }
 
-/* Спека §5: карточка без рамки — плотность была главной болью
-   владельца, и рамка вокруг каждой добавляла к ней ещё слой линий. */
-.card {
-  display: flex;
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  text-decoration: none;
-  color: inherit;
-  transition: box-shadow 0.15s ease, transform 0.15s ease;
-}
-
-.card:hover {
-  box-shadow: var(--shadow);
-  transform: translateY(-2px);
-}
-
-/* Зелёный остался микро-сигналом: на ховере плитка знака отзывается,
-   а не вся карточка перекрашивается. */
-.card:hover .card__icon { color: var(--signal); }
-
-/* Знак внутри плитки. Размер задаётся не контейнером, а самим знаком —
-   единственный способ уравнять их, потому что плотность заполнения кадра
-   у всех разная: измерено по исходникам hackerlab.png занимает 100%
-   кадра, fr13nds-rhackers 91×82%, movies 95×72%, а у Standoff и stats
-   рисунок мелкий внутри чёрного квадрата во весь viewBox и им наоборот
-   нужен крупный размер.
-     --sm 20px  Telegram, GitHub — линейные иконки с отбивкой в координатах
-     --md 24px  HackerLab, FR13NDS, IT Movies, MAX — плотный растр
-     --lg 30px  Standoff, stats — блоковые знаки с мелким рисунком внутри */
-.card__mark {
-  display: block;
-  flex: none;
-  object-fit: contain;
-}
-
-.card__mark--sm { width: 20px; height: 20px; }
-.card__mark--md { width: 24px; height: 24px; }
-.card__mark--lg { width: 30px; height: 30px; }
-
-.card__mark--tg { color: var(--tg); }
-.card__mark--brand { color: var(--brand-ink); }
-
-/* Плитка 44px, радиус 10px — размер сохранён с прежней раскладки:
-   знаки выровнены по ней, и меньший размер стянул бы строки. */
-.card__icon {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--accent);
-}
-
-.card__icon img,
-.card__icon svg {
-  display: block;
-  object-fit: contain;
-}
-
-.card__icon svg { fill: currentColor; }
-
-.card__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  min-width: 0;
-}
-
-.card__name {
-  color: var(--text-strong);
-  font-size: 1.0625rem;
-  font-weight: 500;
-}
-
-.card__note {
+  background: var(--surface);
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.875rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 0.15s ease, border-color 0.15s ease;
 }
 
-/* --- Projects: одна широкая карточка ------------------------------------ */
-
-/* Три равные плитки читались как галерея. Одна панель со строками
-   читается как список сделанного, а круглые углы панели видны только
-   на первой и последней строке. */
-.panel {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
+.chip:hover {
+  color: var(--signal);
+  border-color: var(--signal);
 }
 
-.panel .card {
-  border-radius: 0;
-  background: transparent;
+.chip__icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--brand-ink);
 }
 
-.panel .card:hover {
-  box-shadow: none;
-  transform: none;
-  background: var(--surface-2);
+.chip__icon img,
+.chip__icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
-/* Кольцо фокуса на строке панели рисуется внутрь строки. Снаружи его
-   срезал бы overflow панели: первая строка теряла индикатор фокуса
-   целиком, а клавиатурный пользователь не видел, где находится. */
-.panel .card:focus-visible {
-  outline-offset: -2px;
-}
+.chip__icon svg { fill: currentColor; }
 
 /* --- best of ------------------------------------------------------------ */
 
@@ -508,7 +455,7 @@ main {
 
 /* Спека §7: 2px цветом акцента на всех интерактивах. */
 .pill:focus-visible,
-.card:focus-visible,
+.chip:focus-visible,
 .fact__link:focus-visible,
 .theme-toggle:focus-visible {
   outline: 2px solid var(--accent);
@@ -561,8 +508,8 @@ main {
    помеха, поэтому подъём карточек выключается. Мигающего курсора на
    странице больше нет, выключать нечего. */
 @media (prefers-reduced-motion: reduce) {
-  .pill, .card, .theme-toggle, .fact__link { transition: none; }
-  .pill:hover, .card:hover { transform: none; }
+  .pill, .chip, .theme-toggle, .fact__link { transition: none; }
+  .pill:hover, .chip:hover { transform: none; }
 }
 
 /* --- Печать ------------------------------------------------------------- */
