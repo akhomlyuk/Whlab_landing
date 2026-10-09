@@ -49,9 +49,11 @@ JetBrains Mono моноширинный с шагом 0.6em на любой гл
     есть, но две колонки на широком экране этим не охвачены.
   * Содержимое псевдоэлементов. `::before`/`::after` у флекс-контейнера
     становятся его элементами и занимают место, но в дереве разбора их
-    нет, и мерить их нечем. Правило с таким псевдоэлементом проверка не
-    пропускает молча, а отказывается считать страницу годной — про
-    `.chip::after { padding: 0 120px }` прогон скажет прямо.
+    нет, и прикинуть их ширину нечем. Поэтому прогон не считает такую
+    страницу годной и говорит прямо — но отказывает он не на любом
+    псевдоэлементе, а на том, у которого есть ЧТО ИМЕННО мерить: на
+    непустом `content` (сгенерированный текст) либо на объявлении
+    размера. `content: ""` с нулевыми полями — пустой ящик, он проходит.
   * Правила, условие которых нельзя решить (min-width, всякое неведомое):
     действует худший случай. @media print не действует — страница на
     бумаге, а не на экране.
@@ -61,8 +63,9 @@ JetBrains Mono моноширинный с шагом 0.6em на любой гл
 объявляют то, что влияет на размер. Молча пропустить такое правило —
 значит выпустить страницу с непроверенной неразрывной строкой, то есть
 ровно тот дефект, ради которого файл написан. Обход идёт по меряемым
-боксам **и по их предкам**: размер бокса читается с них всех, и пропуск
-любого из них — тот же тихий недобор.
+боксам, их предкам и тем потомкам, что несут текст или ширину; за этой
+границей остаются листья-картинки, и их недооценка названа в
+measured_nodes словами, а не подразумевается.
 
 Запуск: python tools/narrow_test.py
 Код возврата: 0 — помещается, 1 — нет.
@@ -293,6 +296,17 @@ class Node:
             node = node.parent
         return out
 
+    def descendants(self) -> list["Node"]:
+        """Всё поддерево. `min_content` обходит именно так, поэтому и
+        аудит обязан видеть те же узлы, а не только прямых детей."""
+        out: list[Node] = []
+        queue = list(self.children)
+        while queue:
+            node = queue.pop(0)
+            out.append(node)
+            queue.extend(node.children)
+        return out
+
 
 class Tree(HTMLParser):
     """Дерево страницы. Нужен, чтобы найти элемент селектора вместе с его
@@ -398,20 +412,30 @@ def subject_could_match(part: str, node: Node) -> bool:
     return set(m.group(3).split(".")[1:]) <= set(node.classes)
 
 
-def raising_parts(rules, node: Node, prop: str) -> list[str]:
-    """Проверяемые части селекторов для свойства prop.
+def raising_parts(rules, node: Node, font_px: float, tokens: dict[str, str]) -> None:
+    """Отказаться, если мимо мерятеля ушло объявление, меняющее размер.
 
     Непонимание селектора — не повод пропускать правило молча: оно либо
-    подходит элементу и объявляет нужное свойство (тогда бокс посчитан
-    неверно и страница поедет тихо), либо не подходит и тогда просто не
-    мешает. Разница видна здесь, а не потеряна молча.
+    подходит элементу и объявляет то, что мерятель читает (тогда бокс
+    посчитан неверно и страница поедет тихо), либо не подходит и тогда
+    просто не мешает. Разница видна здесь, а не теряется по дороге.
+
+    Перечень свойств — READ_PROPS, и он сверяется с исходником самого
+    файла в check_read_props_complete: список один на мерятеля и на
+    аудит, иначе они снова разъедутся, как уже разъезжались.
     """
     for _, selector, body in rules:
-        if declared(body, prop) is None:
-            continue
-        for part in parseable(selector)[1]:
-            if subject_could_match(part, node):
-                raise ValueError(f"{part!r} объявляет {prop}, но проверка не умеет его разобрать")
+        for prop in READ_PROPS:
+            value = declared(body, prop)
+            if value is None:
+                continue
+            if decl_is_nil(prop, value, font_px, tokens):
+                continue
+            for part in parseable(selector)[1]:
+                if subject_could_match(part, node):
+                    raise ValueError(
+                        f"{part!r} объявляет {prop}, но проверка не умеет его разобрать"
+                    )
 
 
 def find_nodes(tree: Tree, selector: str) -> list[Node]:
@@ -719,7 +743,10 @@ def fixed_width(rules, node: Node, tokens: dict[str, str], font_px: float) -> fl
     if node.tag in REPLACED_TAGS:
         return width
     for body in own_property_bodies(rules, node):
-        if re.search(r"flex\s*:\s*none\s*;", body) or re.search(r"flex-shrink\s*:\s*0", body):
+        if re.search(r"flex-shrink\s*:\s*0", body):
+            return width
+        value = declared(body, "flex")
+        if value is not None and flex_pins(value):
             return width
     return None
 
@@ -784,87 +811,185 @@ def text_measure(rules, node: Node, text: str, tokens: dict[str, str]) -> float:
     return advance * font_px * len(unit)
 
 
-SIZING_PROPS = (
-    "padding", "border", "width", "gap", "font-size", "font-family",
-    "white-space", "display", "flex-direction", "flex-wrap",
+READ_PROPS = (
+    # Ширина и размеры бокса
+    "width", "min-width",
+    "padding", "padding-left", "padding-right",
+    "padding-inline", "padding-inline-start", "padding-inline-end",
+    "border", "border-width",
+    "border-left", "border-right", "border-left-width", "border-right-width",
+    "gap", "column-gap", "row-gap",
+    # Текст и раскладка
+    "font-size", "font-family", "white-space", "display",
+    "flex-direction", "flex-wrap", "flex", "flex-shrink",
+    # Сгенерированное содержимое: псевдоэлемент у флекс-контейнера — его
+    # элемент, и место он занимает.
+    "content",
 )
+
+# Свойства, значение которых берётся строкой, а не длиной: нулевым оно
+# быть не может, и «выбросил бы мерятель» для них неприменимо.
+NON_LENGTH_PROPS = frozenset((
+    "display", "white-space", "font-family", "flex-direction",
+    "flex-wrap", "flex", "flex-shrink",
+))
+
+
+def flex_pins(value: str) -> bool:
+    """Фиксирует ли объявление `flex` элемент — то есть запрещает сжатие.
+
+    Разбираются обе формы, которые реально встречаются: `flex: none` и
+    `flex: 0 0 auto`. `flex: 1 1 100%` задаёт основу размера, которой
+    модель не пользуется (треков и основ у неё нет), поэтому на ответ
+    не влияет и отказа на аудит не вызывает.
+    """
+    v = " ".join(value.split()).lower()
+    return v == "none" or re.match(r"0\s+0(?:\s|$)", v) is not None
+
+
+def decl_is_nil(prop: str, value: str, font_px: float, tokens: dict[str, str]) -> bool:
+    """Объявление, которое мерятель всё равно выбросил бы.
+
+    Отказ на таком — ложная тревога: `padding: 0` и `content: ""` не
+    добавляют ни пикселя, и требовать их разбирать незачем. А вот
+    `padding: 0 100px` не выбрасывается, поэтому обязан быть разобран.
+    """
+    if prop == "content":
+        return value.strip() in ('""', "''", "none", "normal")
+    if prop == "flex":
+        return not flex_pins(value)
+    if prop == "flex-shrink":
+        return length_px(value, font_px, tokens) != 0
+    lengths = [
+        length_px(part, font_px, tokens)
+        for part in re.split(r"\s+", value.strip())
+        if part
+    ]
+    if not any(l is not None for l in lengths):
+        return prop not in NON_LENGTH_PROPS
+    return all(l == 0 for l in lengths if l is not None)
 
 
 def measured_nodes(rules, tree: Tree, tokens: dict[str, str]) -> list[Node]:
     """Узлы, чей размер проверка читает, — вместе с их предками.
 
-    Это неразрывные строки, контейнеры без переноса, те их дети, у
-    которых есть текст или объявленная ширина, **и все предки всех
-    этих узлов**. Предки нужны не из вежливости: `container_width`
-    снимает с каждого поля и рамку, а `min_content` и `font_size_of`
-    читают по цепочке вверх, — то есть размер меряемого бокса
-    складывается из размеров их всех. Проверка, которая смотрела бы
-    только на сам бокс, пропускала ровно тот случай, где поля панели
-    спрятаны за неразбираемым `#best .spotlight`: 48px исчезали из
-    модели, полоса для плитки вырастала с 238 до 286, и дефект
-    становился невидим.
+    Меряемый бокс — не один узел, а дерево вокруг него:
 
-    Чего в списке нет: знаков и картинок, которые не несут текста и не
-    объявляют ширины, — о них молчать можно.
+      * сам бокс — неразрывная строка либо контейнер без переноса;
+      * все его ПРЕДКИ: `container_width` снимает с каждого поля и рамку,
+        `font_size_of` и `white_space_of` идут по цепочке вверх;
+      * все его ПОТОМКИ, несущие текст или объявленную ширину:
+        `min_content` обходит всё поддерево, и размер внука — часть
+        размера бокса. Пропуск потомка стоил 200px: `.row__body
+        .row__name { padding: 0 100px }` не разбирается, и поля у внука
+        меряемой `a.row` исчезли из модели целиком.
+
+    ГРАНИЦА ПОКРЫТИЯ, дальше которой аудит не смотрит и о чём молчит:
+    листья без текста и без разбираемой ширины. Это знаки и картинки
+    (`<img>`, `<svg>`), чей размер задаётся неразбираемым вроде
+    `.chip__icon img { width: 100% }`, и модель считает их нулём. На
+    странице это плитки 16–20px внутри `.chip__icon` и `.row__icon`, и
+    все они сидят в боксах с десятками свободных пикселей, поэтому
+    размеры их прогон не принимает. Пока появится знак, решающий исход,
+    это останется слепым углом — но названным здесь, а не спрятанным.
     """
     out: list[Node] = []
     seen: set[int] = set()
 
     def add(node: Node) -> None:
-        if id(node) in seen:
-            return
-        seen.add(id(node))
-        out.append(node)
+        if id(node) not in seen:
+            seen.add(id(node))
+            out.append(node)
+
+    def carries(node: Node) -> bool:
+        return bool(node.text()) or fixed_width(
+            rules, node, tokens, font_size_of(rules, node, tokens)
+        ) is not None
 
     for node in tree.nodes:
         kind = flex_kind(rules, node)
-        fixed = fixed_width(rules, node, tokens, font_size_of(rules, node, tokens))
-        carries = bool(node.text()) or fixed is not None
-        measured = ("nowrap" in white_space_of(rules, node) and carries) or kind == "row"
+        measured = ("nowrap" in white_space_of(rules, node) and carries(node)) or kind == "row"
         if not measured:
             continue
         add(node)
         for ancestor in node.ancestors():
             add(ancestor)
-        if kind == "row":
-            for child in node.children:
-                if child.text() or fixed_width(
-                    rules, child, tokens, font_size_of(rules, child, tokens)
-                ) is not None:
-                    add(child)
+        for descendant in node.descendants():
+            if carries(descendant):
+                add(descendant)
     return out
 
 
+def check_read_props_complete() -> None:
+    """READ_PROPS обязан покрывать всё, что мерятель читает из правил.
+
+    Перечень свойств — единственный источник правды сразу для двух
+    половин: мерятель читает по нему размеры, аудит отказывает по
+    нему же. Списки разошлись уже дважды: в `padding_x_of` научились
+    понимать `padding-inline`, а в перечень аудита он не попал — и шесть
+    проб с 240px настоящей ширины проходили молча.
+
+    Чтобы разойтись в третий раз не могли, список сверяется с исходником
+    самого файла: любое свойство, которое мерятель читает литералом —
+    через declared(), own_property() или inherited_property() — обязано
+    быть в READ_PROPS.
+
+    Свойства, собираемые f-строкой (`border-{side}-width`) и те, что
+    берутся регуляркой (`flex: none`, `flex-wrap: wrap`), регуляркой не
+    видны и вносятся списком вручную — в этом и состоит их перечень.
+
+    Список — надмножество: `border-width`, `row-gap`, `min-width`,
+    `content` мерятель напрямую не читает, но объявление с ними под
+    неразбираемым селектором размер тоже меняет, и отказ на них
+    правильный. Лишний элемент здесь безвреден, недостающий — нет.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    readers = r"(?:declared|own_property|inherited_property)"
+    used = set(re.findall(rf"{readers}\([^()]*?\"([a-z][a-z-]*)\"", source))
+    if "border-{side}-" in source:
+        used |= {f"border-{side}-width" for side in ("left", "right")}
+    missing = sorted(used - set(READ_PROPS))
+    if missing:
+        errors.append(
+            "tools/narrow_test.py: свойства читаются мерятелем, но их нет в "
+            f"READ_PROPS: {', '.join(missing)} — аудит перестанет их видеть, "
+            "и объявление снова уйдёт мимо молча"
+        )
+    else:
+        notes.append(f"READ_PROPS: {len(READ_PROPS)} свойств, все читаемые учтены")
+
+
 def check_readable_selectors(rules, tree: Tree, tokens: dict[str, str]) -> None:
-    """Ни одно правило, влияющее на размер меряемого бокса, не осталось
-    непрочитанным.
+    """Отказ вместо догадки там, где геометрия не восстанавливается.
 
     Составной селектор («.chips > .chip», «#best .spotlight») проверка
     не разбирает, и раньше такое правило просто исчезало: бокс считался
-    без объявленных ему полей и выходил уже настоящей ширины, то есть
-    ровно настолько, чтобы длинная подпись влезла туда, куда не влезает.
+    без объявленных ему полей и выходил уже своей настоящей ширины, то
+    есть ровно настолько, чтобы длинная подпись влезла туда, куда не
+    влезает.
 
-    Обход идёт по measured_nodes, а это меряемые боксы **вместе с
-    предками**: размер меряемого бокса читается с них всех, и пропуск
-    любого из них — тот же тихий недобор. Раньше аудит покрывал только
-    сам бокс, и объявление полей у его предка исчезало: `#best
-    .spotlight` съедал 48px, полоса для плитки росла с 238 до 286, а
-    прогон оставался зелёным.
+    ГРАНИЦА ПОКРЫТИЯ — ровно та, что описана в measured_nodes: меряемые
+    боксы, их предки и те их потомки, что несут текст или объявленную
+    ширину. Всё, что вне этого списка, аудит не смотрит; там остаются
+    листья-картинки, и их недооценка названа там же словами, а не
+    подразумевается. Абсолютного обещания файл больше не даёт: оно
+    было ложным дважды, в двух разных направлениях.
 
-    Отказ честнее догадки. Если правило разобрать нельзя и оно может
-    бить по меряемому боксу — это ошибка, а не предупреждение: страница,
-    чью геометрию не удалось восстановить, не может быть названа годной.
+    Объявление, которое мерятель всё равно выбросил бы (`padding: 0`,
+    `content: ""`), отказом не считается — иначе проверка требовала бы
+    разбирать то, что размеру ничего не добавляет.
     """
     for node in measured_nodes(rules, tree, tokens):
-        for prop in SIZING_PROPS:
-            try:
-                raising_parts(rules, node, prop)
-            except ValueError as e:
-                errors.append(
-                    f"style.css: {_sel_of(node)} — {e}; размер бокса посчитан "
-                    "без этого правила и вышел бы уже своей настоящей"
-                )
-                return
+        try:
+            raising_parts(rules, node, font_size_of(rules, node, tokens), tokens)
+        except ValueError as e:
+            errors.append(
+                f"style.css: {_sel_of(node)} — {e}; размер бокса посчитан "
+                "без этого правила и вышел бы уже своей настоящей"
+            )
+            return
+
+
 
 
 def check_flex_rows(rules, tree: Tree, tokens: dict[str, str], root: Node, outer: float) -> None:
@@ -905,26 +1030,54 @@ def _sel_of(node: Node) -> str:
     return f"{node.tag}{'.' + classes if classes else ''}"
 
 
-def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float]:
+def wrapper_bodies(rules) -> list[str]:
+    """Тела всех правил .wrapper в порядке файла.
+
+    Читать обёртку должна одна функция, иначе половина прогона считает
+    по одному правилу, а вторая по другому. Раньше content_width брала
+    ПЕРВОЕ правило .wrapper через next(), а обход контейнеров —
+    ПОСЛЕДНЕЕ через own_property_bodies: дописанная в конец файла
+    `.wrapper { padding-inline: 20px }` сужала полосу плиток до 198px,
+    а check_fixed_widths сверялась с 288px, потому что светилась по
+    первому правилу.
+    """
+    return [body for _, selector, body in rules if ".wrapper" in parseable(selector)[0]]
+
+
+def last_declared(bodies: list[str], prop: str) -> str | None:
+    """Значение свойства по всем правилам: побеждает последнее объявление."""
+    value = None
+    for body in bodies:
+        declared_value = declared(body, prop)
+        if declared_value is not None:
+            value = declared_value
+    return value
+
+
+def content_width(css: str, rules, tokens: dict[str, str]) -> tuple[float, float, float]:
     """Ширина обёртки на MIN_WIDTH и сколько из неё достаётся детям.
 
     Возвращает (ширина рамки полосы, поля по бокам суммарно, полоса
-    детям). Поля по бокам уже вычлись как «100% - 2rem», а padding-inline
-    самой обёртки вычитается здесь — иначе он не учитывался бы вовсе, и
-    полоса для детей вышла бы шире той, что нарисована. Проверки по
-    контейнерам берут ПЕРВУЮ величину и вычитают оформление корня сами:
-    отдать им уже вычтенную полосу значило бы вычесть обёртку дважды.
+    детям). Поля по бокам уже вычлись как «100% - 2rem», а собственные
+    поля и рамка обёртки вычитаются здесь — иначе они не учитывались бы
+    вовсе, и полоса для детей вышла бы шире той, что нарисована. Проверки
+    по контейнерам берут ПЕРВУЮ величину и вычитают оформление корня
+    сами: отдать им уже вычтенную полосу значило бы вычесть обёртку
+    дважды.
+
     Формула читается из самого файла, а не зашита числом: если владелец
     сменит `100% - 2rem` на `100% - 1rem`, бюджет обязан сдвинуться
     вместе с правкой, иначе проверка продолжит считать не тот край,
     который нарисован.
+
+    Обёртка читается через wrapper_bodies — те же правила и в том же
+    порядке, что у обхода контейнеров.
     """
-    wrapper_rule = next((body for _, selector, body in css_rules(css)
-                         if ".wrapper" in parseable(selector)[0]), None)
-    if wrapper_rule is None:
+    bodies = wrapper_bodies(rules)
+    if not bodies:
         errors.append("style.css: нет правила .wrapper — ширину страницы считать нечем")
         return float(MIN_WIDTH), 32.0, float(MIN_WIDTH)
-    width = declared(wrapper_rule, "width") or ""
+    width = last_declared(bodies, "width") or ""
     m = re.search(r"100%\s*-\s*([\d.]+)rem", width)
     if m is None:
         errors.append(
@@ -936,8 +1089,8 @@ def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float
     cap = length_px(tokens.get("--wrapper-max", ""), ROOT_FONT_PX, tokens)
     cap = cap if cap is not None else float("inf")
     box = min(cap, MIN_WIDTH - side_total)
-    chrome = padding_x_of([wrapper_rule], ROOT_FONT_PX, tokens)
-    chrome += border_x_of([wrapper_rule], ROOT_FONT_PX, tokens)
+    chrome = padding_x_of(bodies, ROOT_FONT_PX, tokens)
+    chrome += border_x_of(bodies, ROOT_FONT_PX, tokens)
     return box, side_total, box - chrome
 
 
@@ -1062,16 +1215,6 @@ def check_nowrap_runs(rules, tree: Tree, tokens: dict[str, str], root: Node, out
                     f"({family}) — строку {text!r} нечем мерить, а она не переносится"
                 )
                 continue
-            try:
-                raising_parts(rules, node, "padding")
-                raising_parts(rules, node, "border")
-                raising_parts(rules, node, "width")
-            except ValueError as e:
-                errors.append(
-                    f"style.css: {selector} — {e}; бокс строки {text!r} посчитан "
-                    "бы без этого правила и вышел бы уже своей настоящей"
-                )
-                continue
             run = advance * font_px * len(text)
             box = run + box_overhead(rules, node, tokens, font_px)
             available = container_width(rules, node, root, outer, tokens, font_px)
@@ -1107,14 +1250,14 @@ def main() -> int:
         )
     }
 
-    outer, side_total, available = content_width(css, tokens)
-    print(f"Обёртка на {MIN_WIDTH}px: {outer:g}px, из них поля {side_total:g}px, детям {available:g}px")
-
     # Один раз отсекаются откаты, не действующие на экране MIN_WIDTH, и
     # дальше все проверки работают с одним и тем же списком правил.
     rules = live_rules(css)
     tree = Tree()
     tree.feed(html)
+
+    outer, side_total, available = content_width(css, rules, tokens)
+    print(f"Обёртка на {MIN_WIDTH}px: {outer:g}px, из них поля {side_total:g}px, детям {available:g}px")
 
     # Проверки по контейнерам считают от ширины РАМКИ полосы, а не от её
     # внутренней полосы: оформление корня вычитает container_width, иначе
@@ -1125,6 +1268,7 @@ def main() -> int:
         root = Node("div", ("wrapper",), None)
 
     check_narrow_fallback(rules)
+    check_read_props_complete()
     check_fixed_widths(rules, available)
     check_readable_selectors(rules, tree, tokens)
     check_flex_rows(rules, tree, tokens, root, outer)

@@ -128,33 +128,54 @@ def _specificity(selector: str) -> tuple[int, int, int]:
     return ids, classes, elements
 
 
+def _subject_of(part: str) -> str:
+    """Правая часть селектора — та, к чему он относится.
+
+    `#best .panel` относится к `.panel`, и именно он перебивает
+    `.panel { overflow: visible }` по специфичности. Сравнение строкой
+    целиком такой селектор отвергло бы, а подстрока нашла бы заодно и
+    `.panel__title`, а это вовсе не `.panel`.
+    """
+    right = re.split(r"[\s>+~]+", part.strip())[-1]
+    right = re.sub(r"::[A-Za-z][\w-]*", "", right)
+    right = re.sub(r":[A-Za-z][\w-]*(?:\([^)]*\))?", "", right)
+    right = re.sub(r"\[[^\]]*\]", "", right)
+    return " ".join(right.split())
+
+
 def _print_is_harmless(rules) -> bool:
     """Снимает ли @media print обрезание у .panel.
 
     Печать исключается из худшего случая не по привычке, а потому что
-    на бумаге кольцо обрезать нечем: если print-правило .panel явно
-    ставит overflow: visible, обрезания там нет. Если кто-нибудь это
-    правило снимет или перебьёт, утверждение перестанет быть
+    на бумаге кольцо обрезать нечем: если ПОБЕДИВШЕЕ правило .panel в
+    печати ставит overflow: visible, обрезания там нет. Если кто-нибудь
+    это правило снимет или перебьёт, утверждение перестанет быть
     самоочевидным и печать вернётся в разбор — где она и должна
     высказать своё.
 
-    Победившим считается ПОСЛЕДНЕЕ объявление overflow у .panel в
-    печати, а не любое найденное: иначе две строки подряд — сначала
-    visible, потом hidden — оставляли бы печать объявленной безобидной
-    ровно тогда, когда она режет кольцо. Селектор сверяется целиком:
-    подстрока нашла бы `.panel__title`, а это не `.panel`.
+    Побеждает каскад, а не порядок в файле: `#best .panel { overflow:
+    hidden }` (1,1,0) перебивает `.panel { overflow: visible }` (0,1,0)
+    где бы ни стоял. Предикат, который брал последнее по файлу, такую
+    печать объявлял безобидной — а кольцо на бумаге срезалось.
+    Предыдущий его вариант был строго хуже: сверял селектор подстрокой и
+    принимал любое объявление overflow, не спрашивая, какое выигрывает.
     """
-    value = None
-    for media, _, selector, body in rules:
+    best: tuple[bool, tuple[int, int, int], int, str] | None = None
+    for media, order, selector, body in rules:
         if not any("print" in m for m in media):
             continue
+        value = _declared(body, "overflow")
+        if value is None:
+            continue
         for part in selector.split(","):
-            if " ".join(part.split()) != ".panel":
+            part = " ".join(part.split())
+            if _subject_of(part) != ".panel":
                 continue
-            declared = _declared(body, "overflow")
-            if declared is not None:
-                value = declared
-    return value is not None and value.startswith("visible")
+            important = "!important" in body
+            candidate = (important, _specificity(part), order, value)
+            if best is None or candidate[:3] > best[:3]:
+                best = candidate
+    return best is not None and best[3].startswith("visible")
 
 
 def _worst_case_offset(rules) -> tuple[float | None, str]:
