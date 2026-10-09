@@ -658,7 +658,6 @@ main {
     --border: #BBBBBB;
     --accent: #0369A1;
     --signal: #166534;
-    --gold: #8F6419;
 
     /* Фирменные знаки печатались белилами по белому и просто исчезали:
        --brand-ink в тёмной теме это #FFFFFF, и на бумаге он неотличим
@@ -672,8 +671,32 @@ main {
 
   body { background: #FFFFFF; }
 
+  /* Спека §7: на листе одна колонка в порядке чтения. Области названы
+     явно, а не сброшены в auto — иначе возвращение двух колонок на
+     печати не заметил бы ни один прогон. */
+  main {
+    grid-template-areas:
+      'about'
+      'projects'
+      'best'
+      'elsewhere';
+    grid-template-columns: 1fr;
+  }
+
+  #about, #projects, #best { margin-block-end: var(--space-5); }
+
+  /* Скругления держатся на обрезании: на бумаге углы должны быть
+     прямыми, и панель обязана отдать его содержимому. */
+  .panel,
+  .spotlight {
+    border-radius: 0;
+    overflow: visible;
+  }
+
   .hero,
-  .card,
+  .chip,
+  .row,
+  .spotlight,
   .panel {
     box-shadow: none;
     break-inside: avoid;
