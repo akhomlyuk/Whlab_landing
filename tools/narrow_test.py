@@ -10,14 +10,23 @@
 каждое правило в style.css при этом написано верно, и проверка на
 контракт его бы не заметила.
 
-Поэтому здесь считают, а не ищут подстроку. Для каждого правила с
-white-space: nowrap проверка находит элемент в index.html, берёт его текст,
-меряет текст по метрике шрифта и прибавляет оформление бокса: поля, рамку,
-интервал между флекс-элементами и фиксированную ширину значка. Сумма —
-это минимальная ширина элемента: уже он стать не может, а на более узкой
-странице поедет. Самая широкая из этих ширин плюс поля обёртки и есть та
-ширина экрана, ниже которой визитка не помещается; она и сравнивается с
-320px.
+Поэтому здесь считают, а не ищут подстроку. Считается три вещи, и все
+три — в одном и том же ключе: ширина неразрывной строки, ширина бокса
+вокруг неё и полоса, в которую этот бокс должен влезть.
+
+1. Неразрывная строка. Для каждого правила с white-space: nowrap
+   проверка находит элемент в index.html, берёт его текст, меряет текст
+   по метрике гарнитуры и прибавляет оформление бокса: поля, рамку,
+   интервал между флекс-элементами и фиксированную ширину значка.
+2. Полоса. Считается не полоса страницы, а полоса ВНУТРИ контейнера:
+   от 288px отнимаются поля и рамка каждого предка по пути к элементу.
+   Плитка внутри .spotlight получает не 288, а 238 — и именно с ней
+   сверяется, потому что 288 ей ничего не говорит.
+3. Неразрывная строка внутри флекс-контейнера без переноса. Ширина
+   такой строки не освобождается соседям: контейнер не переносит свои
+   элементы и обязан уместить их все на одной строке. Поэтому
+   считается минимальная ширина контейнера — сумма минимальных ширин
+   элементов плюс интервалы и поля — и сверяется с его же полосой.
 
 Метрика шрифта здесь не прикидка «на глаз», а свойство самих шрифтов:
 JetBrains Mono моноширинный с шагом 0.6em на любой глиф. Это замерено в
@@ -27,10 +36,26 @@ JetBrains Mono моноширинный с шагом 0.6em на любой гл
 ошибка тут может дать лишнее «не помещается», но не может дать лишнее
 «помещается».
 
+ЧТО ФАЙЛ НЕ ЛОВИТ — важно, чтобы это не выдавали за защиту:
+
+  * Сжатие флекс-элементов. Плитка .place — флекс-элемент с
+    flex-shrink: 1, и если её натуральная ширина больше полосы,
+    браузер не поедет за край, а сожмёт подписи ВНУТРИ. Так «Top 3»
+    превратилось в «Top / 3» на 320px. Минимальная ширина флекс-элемента
+    считается по неразрывным кускам и по самому длинному слову, а
+    натуральная — нет: чтобы её узнать, нужен разрыв строк. Откат
+    правки `.place__year`/`.place__rank` этот прогон НЕ заметит.
+  * Сетку. display: grid считается как один столбец — на 320px так и
+    есть, но две колонки на широком экране этим не охвачены.
+  * Правила, условие которых нельзя решить (min-width, всякое неведомое):
+    действует худший случай. @media print не действует — страница на
+    бумаге, а не на экране.
+
 Что проверка НЕ умеет и говорит об этом ошибкой, а не молчит: разбирать
-составные селекторы («.chips > .chip», «.chip:hover»). Молча пропустить
-такое правило — значит выпустить страницу с непроверенной неразрывной
-строкой, то есть ровно тот дефект, ради которого файл написан.
+составные селекторы («.chips > .chip», «.chip:hover») там, где они
+объявляют то, что влияет на размер. Молча пропустить такое правило —
+значит выпустить страницу с непроверенной неразрывной строкой, то есть
+ровно тот дефект, ради которого файл написан.
 
 Запуск: python tools/narrow_test.py
 Код возврата: 0 — помещается, 1 — нет.
@@ -76,6 +101,23 @@ VOID_TAGS = frozenset((
 
 # Содержимое этих тегов не является текстом страницы.
 NON_TEXT_TAGS = frozenset(("script", "style"))
+
+# Теги, которые по умолчанию блочные. Умолчание нужно, потому что у
+# .block, li и section нет объявления display, а считать их инлайновыми
+# значит не увидеть в раскладке ни одного блока.
+BLOCK_TAGS = frozenset((
+    "address", "article", "aside", "blockquote", "body", "dd", "div", "dl",
+    "dt", "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2",
+    "h3", "h4", "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p",
+    "pre", "section", "table", "ul",
+))
+
+# Заменяющие элементы: у них собственная ширина и есть минимальная, они не
+# сжимаются до нуля, как бокс с текстом.
+REPLACED_TAGS = frozenset((
+    "canvas", "embed", "iframe", "img", "input", "object", "picture", "svg",
+    "video",
+))
 
 errors: list[str] = []
 notes: list[str] = []
@@ -127,6 +169,44 @@ def css_rules(css: str) -> list[tuple[tuple[str, ...], str, str]]:
             prelude += ch
             i += 1
     return out
+
+
+def media_applies(condition: str, width: float) -> bool:
+    """Действует ли @media на экране шириной width.
+
+    Условие не вычисляется — вычисляется только применимость, и то там,
+    где её можно решить однозначно. Всё неразрешимое считается
+    действующим: лучше лишняя ошибка, чем уверенное «помещается» на
+    странице, которую надо было померить.
+    """
+    if re.search(r"\bprint\b", condition):
+        return False
+    m = re.search(r"max-width\s*:\s*([\d.]+)px", condition)
+    if m:
+        return float(m.group(1)) >= width
+    m = re.search(r"min-width\s*:\s*([\d.]+)px", condition)
+    if m:
+        return width >= float(m.group(1))
+    return True
+
+
+def applicable_conditions(rules) -> set[str]:
+    """Условия @media из правил, действующие на экране MIN_WIDTH."""
+    conditions = {c for media, _, _ in rules for c in media}
+    return {c for c in conditions if media_applies(c, MIN_WIDTH)}
+
+
+def live_rules(css: str) -> list[tuple[tuple[str, ...], str, str]]:
+    """Правила, которые вообще могут действовать на экране MIN_WIDTH.
+
+    Отсечение делается один раз, здесь, а не в каждом обходе: иначе
+    пришлось бы повторять «пропустить @media» в шести местах, и одно
+    из них рано или поздно забылось бы — а забытое здесь означает
+    неразобранный каскад, то есть тихо неверные числа.
+    """
+    rules = css_rules(css)
+    ok = applicable_conditions(rules)
+    return [r for r in rules if all(c in ok for c in r[0])]
 
 
 def declared(body: str, prop: str) -> str | None:
@@ -189,14 +269,14 @@ class Node:
             stack = list(node.children) + stack
         return " ".join(" ".join(out).split())
 
-    def items(self) -> int:
-        """Сколько флекс-элементов (или инлайн-боксов) внутри элемента.
+    def direct_text(self) -> str:
+        """Только собственный текст элемента, без текста потомков.
 
-        Текстовый узел внутри flex-контейнера тоже элемент, поэтому он
-        считается наравне с тегами: без этого у .chip не было бы интервала
-        между значком и подписью.
+        Отдельно от text() он нужен при разборе флекс-контейнера: текст,
+        лежащий между двумя <span>, становится отдельным элементом строки,
+        и посчитанный вместе с потомками он посчитался бы дважды.
         """
-        return len(self.children) + (1 if self.text() else 0)
+        return " ".join(" ".join(self.chunks).split())
 
     def ancestors(self) -> list["Node"]:
         out: list[Node] = []
@@ -259,14 +339,7 @@ def selector_matches(selector: str, node: Node) -> bool:
 
 
 def parseable(selector: str) -> tuple[list[str], list[str]]:
-    """Части селектора, которые проверка умеет, и те, которых она не умеет.
-
-    Составные селекторы («.chips > .chip», «a[href]::after») не мешают
-    искать свойства элемента — они просто не про этот элемент, и молча
-    пропустить их безопасно. Но в правиле с white-space: nowrap молчать
-    нельзя: это правило обязано быть измерено, поэтому find_nodes
-    возвращает и непонятные части, а вызывающий код ругается.
-    """
+    """Части селектора, которые проверка умеет, и те, которых она не умеет."""
     parts = [" ".join(p.split()) for p in selector.split(",") if p.strip()]
     good, bad = [], []
     for part in parts:
@@ -277,6 +350,51 @@ def parseable(selector: str) -> tuple[list[str], list[str]]:
         else:
             good.append(part)
     return good, bad
+
+
+def subject_could_match(part: str, node: Node) -> bool:
+    """Относится ли непонятный селектор к этому элементу — хотя бы правой
+    частью своей цепочки.
+
+    Разбирать весь селектор не нужно: важно лишь одно — может ли это
+    правило вообще бить по данному элементу. `.chips > .chip` — может,
+    и молчать про него нельзя. А `a[href]::after` — не может: псевдоэлемента
+    в дереве нет. Отсеиваются и правила, чья правая часть указывает на
+    другой элемент (`.hero__shield svg` для чипа), иначе проверка ругалась
+    бы на каждый второй селектор в файле.
+
+    Если правую часть разобрать не удалось, ответ — «может»: неизвестное
+    считается опасным.
+    """
+    right = re.split(r"[\s>+~]+", part.strip())[-1]
+    if not right or "::" in right:
+        return False
+    right = re.sub(r":[A-Za-z][\w-]*", "", right)
+    right = re.sub(r"\[[^\]]*\]", "", right)
+    m = SIMPLE_SELECTOR.match(right)
+    if m is None:
+        return True
+    if m.group(2) == "*":
+        return True
+    if m.group(1) is not None and m.group(1).lower() != (node.tag or ""):
+        return False
+    return set(m.group(3).split(".")[1:]) <= set(node.classes)
+
+
+def raising_parts(rules, node: Node, prop: str) -> list[str]:
+    """Проверяемые части селекторов для свойства prop.
+
+    Непонимание селектора — не повод пропускать правило молча: оно либо
+    подходит элементу и объявляет нужное свойство (тогда бокс посчитан
+    неверно и страница поедет тихо), либо не подходит и тогда просто не
+    мешает. Разница видна здесь, а не потеряна молча.
+    """
+    for _, selector, body in rules:
+        if declared(body, prop) is None:
+            continue
+        for part in parseable(selector)[1]:
+            if subject_could_match(part, node):
+                raise ValueError(f"{part!r} объявляет {prop}, но проверка не умеет его разобрать")
 
 
 def find_nodes(tree: Tree, selector: str) -> list[Node]:
@@ -290,16 +408,20 @@ def find_nodes(tree: Tree, selector: str) -> list[Node]:
 # --- Свойства элемента по правилам ---------------------------------------
 
 def own_property(rules, node: Node, prop: str, tokens: dict[str, str], font_px: float):
-    """Значение свойства на самом элементе (последнее правило в файле)."""
-    for media, selector, body in rules:
-        if media:
-            continue
-        parts, _ = parseable(selector)
-        if any(selector_matches(p, node) for p in parts):
-            value = declared(body, prop)
-            if value is not None:
-                return length_px(value, font_px, tokens)
-    return None
+    """Значение свойства на самом элементе.
+
+    Побеждает ПОСЛЕДНЕЕ правило в файле, а не первое. Обход по порядку
+    файла с возвратом на первой подходящей строке читает каскад наоборот
+    и выдаёт уверенно неверные числа: раннее правило с правильным кеглем
+    перебивало бы позднее настоящее с 4rem, чипы вышли бы по 741px, и
+    проверка радостно сообщала бы «201.2px».
+    """
+    value = None
+    for body in own_property_bodies(rules, node):
+        declared_value = declared(body, prop)
+        if declared_value is not None:
+            value = length_px(declared_value, font_px, tokens)
+    return value
 
 
 def inherited_property(rules, node: Node, prop: str, tokens: dict[str, str], font_px: float):
@@ -330,24 +452,25 @@ def advance_of(rules, node: Node, tokens: dict[str, str]) -> tuple[float, str]:
     Нулевой шаг означает «гарнитуру определить нечем»: подставлять шаг
     наугад здесь опаснее, чем сказать правду, потому что неизвестная
     гарнитура — это ровно тот случай, где прокрутка появляется тихо.
+
+    Обход ведёт себя так же, как own_property: сначала сам элемент и
+    последнее правило для него, и только потом предки.
     """
-    for rule in (node,) + tuple(node.ancestors()):
-        for media, selector, body in rules:
-            if media:
-                continue
-            parts, _ = parseable(selector)
-            if not any(selector_matches(p, rule) for p in parts):
-                continue
-            value = declared(body, "font-family")
-            if value is None:
-                continue
-            m = re.search(r"var\(\s*(--[\w-]+)", value)
-            resolved = tokens.get(m.group(1), "") if m else value
-            if "JetBrains Mono" in resolved or "monospace" in resolved:
-                return MONO_ADVANCE, "JetBrains Mono"
-            if "Ubuntu" in resolved:
-                return PROPORTIONAL_ADVANCE, "Ubuntu"
-            return 0.0, resolved.strip("'\" ")
+    for target in (node,) + tuple(node.ancestors()):
+        value = None
+        for body in own_property_bodies(rules, target):
+            declared_value = declared(body, "font-family")
+            if declared_value is not None:
+                value = declared_value
+        if value is None:
+            continue
+        m = re.search(r"var\(\s*(--[\w-]+)", value)
+        resolved = tokens.get(m.group(1), "") if m else value
+        if "JetBrains Mono" in resolved or "monospace" in resolved:
+            return MONO_ADVANCE, "JetBrains Mono"
+        if "Ubuntu" in resolved:
+            return PROPORTIONAL_ADVANCE, "Ubuntu"
+        return 0.0, resolved.strip("'\" ")
     return 0.0, "гарнитура по умолчанию из браузера"
 
 
@@ -405,22 +528,22 @@ def box_overhead(rules, node: Node, tokens: dict[str, str], font_px: float) -> f
     влезла туда, куда не влезает.
 
     Известная недооценка: у .hero__tag щит — это не прямой ребёнок, а
-    svg внутри .hero__shield, и его width: 0.95em в счёт не идёт. Подпись
-    считается на 17px уже настоящей, но там её 202px против полосы в
-    288px, так что запас перекрывает ошибку с запасом. Обратного хуже:
-    занижение здесь может дать лишнее «помещается» — и если бы щит
-    дорос до сотни пикселей, проверка промолчала бы.
+    svg внутри .hero__shield, и его width: 0.95em в счёт не идёт: селектор
+    «.hero__shield svg» составной, и check_readable_selectors его не
+    считает ошибкой только потому, что svg не несёт текста и подписи не
+    решает. Подпись выходит на 17px уже настоящей, но там её 202px против
+    полосы в 288px, так что запас перекрывает ошибку. Обратного хуже:
+    занижение способно дать лишнее «помещается», и если бы щит дорос до
+    сотни пикселей, проверка промолчала бы.
     """
     own = own_property_bodies(rules, node)
     overhead = padding_x_of(own, font_px, tokens) + border_x_of(own, font_px, tokens)
 
-    gaps = 0.0
-    for rule_body in own:
-        for prop in ("gap", "column-gap"):
-            value = length_px(declared(rule_body, prop), font_px, tokens)
-            if value is not None:
-                gaps = max(gaps, value)
-    overhead += gaps * max(0, node.items() - 1)
+    # Интервал считается между соседними элементами строки. Текстовый узел
+    # между тегами тоже элемент — без этого у .chip не было бы зазора между
+    # значком и подписью, и плитка сочлась бы на 8px уже своей настоящей.
+    parts = len(node.children) + (1 if node.direct_text() else 0)
+    overhead += gap_x_of(rules, node, font_px, tokens) * max(0, parts - 1)
 
     for child in node.children:
         for child_body in own_property_bodies(rules, child):
@@ -431,27 +554,305 @@ def box_overhead(rules, node: Node, tokens: dict[str, str], font_px: float) -> f
 
 
 def own_property_bodies(rules, node: Node) -> list[str]:
-    """Тела правил, бьющих прямо по элементу (без предков и без медиа)."""
+    """Тела правил, бьющих прямо по элементу, в порядке файла.
+
+    Медиа-откаты уже отсечены в live_rules, поэтому здесь проверки на
+    media нет: повторять её в каждом обходе — значит забыть её в одном
+    из них, а забытая даёт неразобранный каскад.
+    """
     out = []
-    for media, selector, body in rules:
-        if media:
-            continue
+    for _, selector, body in rules:
         parts, _ = parseable(selector)
         if any(selector_matches(p, node) for p in parts):
             out.append(body)
     return out
 
 
+def white_space_of(rules, node: Node) -> str:
+    """white-space элемента: своё объявление, иначе предковое.
+
+    Нужно, чтобы отличить неразрывный текст от переносного: у первого
+    минимальная ширина равна всей строке, у второго — самому длинному
+    слову.
+    """
+    value = None
+    for body in own_property_bodies(rules, node):
+        declared_value = declared(body, "white-space")
+        if declared_value is not None:
+            value = declared_value
+    if value is None:
+        for ancestor in node.ancestors():
+            for body in own_property_bodies(rules, ancestor):
+                declared_value = declared(body, "white-space")
+                if declared_value is not None:
+                    value = declared_value
+            if value is not None:
+                break
+    return value or "normal"
+
+
+def container_width(rules, node: Node, strip: float, tokens: dict[str, str], font_px: float) -> float:
+    """Полоса, доступная боксу элемента, — с учётом предков.
+
+    Сравнивать бокс с полосой страницы нельзя: у плитки внутри .spotlight
+    полоса не 288, а 238, потому что между ней и страницей стоят поля и
+    рамка панели. Отнимается оформление КАЖДОГО предка по пути — включая
+    саму .wrapper, у которой поля по бокам, если их заведут, тоже
+    отнимутся от полосы (иначе они считались бы дважды).
+    """
+    width = strip
+    for ancestor in node.ancestors():
+        bodies = own_property_bodies(rules, ancestor)
+        width -= padding_x_of(bodies, font_px, tokens)
+        width -= border_x_of(bodies, font_px, tokens)
+    return width
+
+
 # --- Проверки -------------------------------------------------------------
 
-def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float]:
-    """Ширина обёртки на MIN_WIDTH и сколько из неё достаётся контенту.
+def display_of(rules, node: Node) -> str:
+    """display элемента: своё объявление, иначе умолчание по тегу."""
+    value = None
+    for body in own_property_bodies(rules, node):
+        declared_value = declared(body, "display")
+        if declared_value is not None:
+            value = declared_value
+    if value is not None:
+        return value
+    return "block" if node.tag in BLOCK_TAGS else "inline"
 
-    Возвращает (ширина обёртки, поля по бокам суммарно, ширина контента).
-    Формула читается из самого файла, а не зашита числом: если владелец
-    сменит `100% - 2rem` на `100% - 1rem`, бюджет контента обязан
-    сдвинуться вместе с правкой, иначе проверка продолжитт считать не
-    тот край, который нарисован.
+
+def flex_kind(rules, node: Node) -> str:
+    """Как элементы расставлены по ширине: «row», «stack» или «».
+
+    «row» — флекс-контейнер, который не переносит элементы и кладёт их в
+    одну строку. Минимальная ширина такого контейнера равна СУММЕ
+    минимальных ширин элементов: места соседям не остаётся, и если сумма
+    не влезает, браузер либо сожмёт элементы, либо поедет за край — молча.
+
+    «stack» — перенос, колонка или сетка: элементы не конкурируют за одну
+    строку, поэтому берётся наибольшая из минимальных, а не сумма. Сетка
+    считается одним столбцом — на 320px она одна, и это единственное,
+    что здесь нужно.
+    """
+    display = display_of(rules, node)
+    if "grid" in display:
+        return "stack"
+    if "flex" not in display:
+        return ""
+    direction = None
+    for body in own_property_bodies(rules, node):
+        value = declared(body, "flex-direction")
+        if value is not None:
+            direction = value
+    if direction is not None and "column" in direction:
+        return "stack"
+    for body in own_property_bodies(rules, node):
+        if re.search(r"flex-wrap\s*:\s*wrap", body):
+            return "stack"
+    return "row"
+
+
+def gap_x_of(rules, node: Node, font_px: float, tokens: dict[str, str]) -> float:
+    """Интервал по горизонтали — наибольший из объявленных."""
+    gap = 0.0
+    for body in own_property_bodies(rules, node):
+        for prop in ("gap", "column-gap"):
+            value = length_px(declared(body, prop), font_px, tokens)
+            if value is not None:
+                gap = max(gap, value)
+    return gap
+
+
+def fixed_width(rules, node: Node, tokens: dict[str, str], font_px: float) -> float | None:
+    """Ширина, которую бокс не отдаст никогда.
+
+    Объявленная width становится такой, только если элемент не сжимается
+    (`flex: none` либо `flex-shrink: 0`) или если он заменяющий — у
+    заменяющего собственная ширина и есть минимальная. Иначе элемент
+    ужимается до своей минимальной, и width ничего не значит: без этой
+    оговорки иконка 36px посчиталась бы нулём и не учлась бы в строке.
+    """
+    width = own_property(rules, node, "width", tokens, font_px)
+    if width is None:
+        return None
+    if node.tag in REPLACED_TAGS:
+        return width
+    for body in own_property_bodies(rules, node):
+        if re.search(r"flex\s*:\s*none\s*;", body) or re.search(r"flex-shrink\s*:\s*0", body):
+            return width
+    return None
+
+
+def min_content(rules, node: Node, tokens: dict[str, str], depth: int = 0) -> float:
+    """Наименьшая ширина, в которую бокс ещё может ужаться.
+
+    Текст без переноса тянется всей строкой, переносный — самым длинным
+    словом: перенос разрезает строку по пробелу, и уже это слово и есть
+    наименьшая возможная ширина. Дети считаются рекурсивно по тем же
+    правилам, а собственный текст элемента — отдельно от текста детей:
+    иначе он посчитался бы дважды.
+    """
+    if depth > 12:
+        return 0.0
+    font_px = font_size_of(rules, node, tokens)
+    bodies = own_property_bodies(rules, node)
+    chrome = padding_x_of(bodies, font_px, tokens) + border_x_of(bodies, font_px, tokens)
+
+    fixed = fixed_width(rules, node, tokens, font_px)
+    if fixed is not None:
+        return chrome + fixed
+
+    kind = flex_kind(rules, node)
+    if kind:
+        parts = [min_content(rules, c, tokens, depth + 1) for c in node.children]
+        if node.direct_text():
+            parts.append(text_measure(rules, node, node.direct_text(), tokens))
+    else:
+        # Обычный блок: боксы-дети дают максимум, инлайновые дети отдельно
+        # не считаются — они текут в строке вместе с текстом.
+        parts = [
+            min_content(rules, c, tokens, depth + 1)
+            for c in node.children
+            if display_of(rules, c) not in ("inline", "inline-flex", "inline-grid", "inline-block")
+        ]
+        if node.text():
+            parts.append(text_measure(rules, node, node.text(), tokens))
+
+    if not parts:
+        return chrome
+    if kind == "row":
+        return chrome + sum(parts) + gap_x_of(rules, node, font_px, tokens) * (len(parts) - 1)
+    return chrome + max(parts)
+
+
+def text_measure(rules, node: Node, text: str, tokens: dict[str, str]) -> float:
+    """Ширина текста в его наименьшей возможной ширине."""
+    if not text:
+        return 0.0
+    font_px = font_size_of(rules, node, tokens)
+    advance, _ = advance_of(rules, node, tokens)
+    if not advance:
+        return 0.0
+    if "nowrap" in white_space_of(rules, node):
+        unit = text
+    else:
+        # Самое длинное слово. Перенос по дефису не учитывается: браузер
+        # рвёт строку и по нему, а разбирать правила переноса тут нечем.
+        # Оценка в сторону завышения — в сторону ошибки, а не пропуска.
+        unit = max(text.split(" "), key=len)
+    return advance * font_px * len(unit)
+
+
+SIZING_PROPS = (
+    "padding", "border", "width", "gap", "font-size", "font-family",
+    "white-space", "display", "flex-direction", "flex-wrap",
+)
+
+
+def measured_nodes(rules, tree: Tree, tokens: dict[str, str]) -> list[Node]:
+    """Боксы, чью ширину проверка сверяет с полосой.
+
+    Это неразрывные строки, контейнеры без переноса и те их дети, у
+    которых есть текст или объявленная ширина. Только размер этих боксов
+    решает, влезет ли страница. Остальное — знаки и картинки, которые
+    либо не несут текста, либо уже посчитаны вместе с родителем; о них
+    молчать можно, а об измеренных молчать нельзя. Поэтому svg, которому
+    ширину задаёт неразбираемый «.hero__shield svg», в список не
+    попадает: подписи у него нет, и решать по нему нечего.
+    """
+    out: list[Node] = []
+    for node in tree.nodes:
+        kind = flex_kind(rules, node)
+        carries = node.text() or fixed_width(
+            rules, node, tokens, font_size_of(rules, node, tokens)
+        ) is not None
+        if "nowrap" in white_space_of(rules, node) and carries or kind == "row":
+            out.append(node)
+        if kind == "row":
+            for child in node.children:
+                child_fixed = fixed_width(
+                    rules, child, tokens, font_size_of(rules, child, tokens)
+                )
+                if child.text() or child_fixed is not None:
+                    out.append(child)
+    return out
+
+
+def check_readable_selectors(rules, tree: Tree, tokens: dict[str, str]) -> None:
+    """Ни одно правило, влияющее на размер меряемого бокса, не осталось
+    непрочитанным.
+
+    Составной селектор («.chips > .chip») проверка не разбирает, и раньше
+    такое правило просто исчезало: бокс считался без объявленных ему
+    полей и выходил уже настоящей ширины, то есть ровно настолько, чтобы
+    длинная подпись влезла туда, куда не влезает.
+
+    Отказ честнее догадки. Если правило разобрать нельзя и оно может
+    бить по меряемому боксу — это ошибка, а не предупреждение: страница,
+    чью геометрию не удалось восстановить, не может быть названа годной.
+    """
+    for node in measured_nodes(rules, tree, tokens):
+        for prop in SIZING_PROPS:
+            try:
+                raising_parts(rules, node, prop)
+            except ValueError as e:
+                errors.append(
+                    f"style.css: {_sel_of(node)} — {e}; размер бокса посчитан "
+                    "без этого правила и вышел бы уже своей настоящей"
+                )
+                return
+
+
+def check_flex_rows(rules, tree: Tree, tokens: dict[str, str], strip: float) -> None:
+    """Неразрывная строка в негнущемся флекс-контейнере не оставляет соседям места.
+
+    Без этой проверки неразрывная строка проходила бы, если бы ей хватало
+    полосы, — а места ей не хватало: ширина строки не освобождается
+    соседям, и контейнер либо сожмёт их, либо вылезет за край. Именно так
+    вела себя плитка «2024 Red Team Scenarios Top 3» на 320px.
+    """
+    checked = 0
+    worst = 0.0
+    worst_label = "—"
+    for node in tree.nodes:
+        if flex_kind(rules, node) != "row":
+            continue
+        font_px = font_size_of(rules, node, tokens)
+        available = container_width(rules, node, strip, tokens, font_px)
+        need = min_content(rules, node, tokens)
+        checked += 1
+        if need > worst:
+            worst, worst_label = need, _sel_of(node)
+        if need > available:
+            errors.append(
+                f"{_sel_of(node)}: элементы не переносятся, вместе им нужно "
+                f"{need:.0f}px, а контейнер отдаёт {available:g}px — лишнее "
+                "сожмёт подписи, избыток уйдёт за правый край"
+            )
+    if checked:
+        notes.append(
+            f"Флекс-контейнеров без переноса: {checked}, самый тесный — "
+            f"{worst_label}: {worst:.0f}px"
+        )
+
+
+def _sel_of(node: Node) -> str:
+    classes = ".".join(node.classes)
+    return f"{node.tag}{'.' + classes if classes else ''}"
+
+
+def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float]:
+    """Ширина обёртки на MIN_WIDTH и сколько из неё достаётся детям.
+
+    Возвращает (ширина обёртки, поля по бокам суммарно, полоса детям).
+    Поля по бокам уже вычлись как «100% - 2rem», а вот padding-inline
+    самой обёртки, если его заведут, отнимается здесь: иначе он
+    посчитался бы дважды — и оптимистично, чего делать нельзя. Формула
+    читается из самого файла, а не зашита числом: если владелец сменит
+    `100% - 2rem` на `100% - 1rem`, бюджет обязан сдвинуться вместе с
+    правкой, иначе проверка продолжит считать не тот край, который
+    нарисован.
     """
     wrapper_rule = next((body for _, selector, body in css_rules(css)
                          if ".wrapper" in parseable(selector)[0]), None)
@@ -470,10 +871,12 @@ def content_width(css: str, tokens: dict[str, str]) -> tuple[float, float, float
     cap = length_px(tokens.get("--wrapper-max", ""), ROOT_FONT_PX, tokens)
     cap = cap if cap is not None else float("inf")
     box = min(cap, MIN_WIDTH - side_total)
-    return box, side_total, box
+    chrome = padding_x_of([wrapper_rule], ROOT_FONT_PX, tokens)
+    chrome += border_x_of([wrapper_rule], ROOT_FONT_PX, tokens)
+    return box, side_total, box - chrome
 
 
-def check_narrow_fallback(css: str) -> None:
+def check_narrow_fallback(rules) -> None:
     """На 320px раскладка обязана быть одноколоночной, и откат обязан
     на 320px вообще действовать.
 
@@ -481,44 +884,32 @@ def check_narrow_fallback(css: str) -> None:
     (max-width: 240px) не сработает на экране в 320px, а страница всё
     равно нарисуется двумя колонками и уедет вбок. Проверка на
     присутствие такого отката молчала бы ровно на той ширине, ради
-    которой он написан, поэтому граница сравнивается с 320px, а не
-    ищется как строка.
+    которой он написан, поэтому граница сравнивается с 320px — и
+    делается это в media_applies, откуда в правила попадает только то,
+    что на 320px действительно действует. Отката, чей порог не дотягивает
+    до целевого экрана, здесь просто не будет: порог отсеется, и
+    отсутствие отката станет пустым списком, а не ложным «есть».
     """
-    blocks = [
-        (float(b), m)
-        for b, m in re.findall(
-            r"@media\s*\(max-width:\s*([\d.]+)px\)\s*\{(.*?)\n\}", css, re.DOTALL
-        )
-    ]
-    if not blocks:
-        errors.append(
-            "style.css: нет @media (max-width: Npx) — на 320px страница "
-            "останется в двух колонках и поедет вбок"
-        )
-        return
-    # Откат, который на 320px действует, — это тот, у кого граница не уже
-    # целевой ширины: max-width: 640px на экране в 320px срабатывает.
-    # Наоборот, откат на max-width: 240px на 320-экранном телефоне не
-    # действует, и страница рисуется двумя колонками: наличие правила в
-    # файле для этого ничего не значит.
-    applicable = [b for b in blocks if b[0] >= MIN_WIDTH]
-    if not applicable:
-        widest = max(b[0] for b in blocks)
+    narrow = [m for m, _, _ in rules if "max-width" in " ".join(m)]
+    if not narrow:
         errors.append(
             f"style.css: ни один откат не действует на {MIN_WIDTH}px — "
-            f"самый широкий порог max-width: {widest:g}px, а страница "
-            "останется в двух колонках и поедет вбок"
+            "страница останется в двух колонках и поедет вбок"
         )
         return
-    breakpoint, inner = max(applicable, key=lambda b: b[0])
-    inner = re.sub(r"/\*.*?\*/", "", inner, flags=re.DOTALL)
 
+    inner = "\n".join(body for m, _, body in rules if "max-width" in " ".join(m))
     rows = [
         r.split()
-        for r in re.findall(r"grid-template-areas\s*:(.*?);", inner, re.DOTALL)
-        for r in re.findall(r"['\"]([^'\"]*)['\"]", r)
+        for decl in re.findall(r"grid-template-areas\s*:(.*?);", inner, re.DOTALL)
+        for r in re.findall(r"['\"]([^'\"]*)['\"]", decl)
     ]
-    if rows and any(len(r) != 1 for r in rows):
+    if not rows:
+        errors.append(
+            "@media: области не перестроены в одну колонку — блок не "
+            "объявляет grid-template-areas, и main остаётся двухколоночным"
+        )
+    elif any(len(r) != 1 for r in rows):
         fat = next(r for r in rows if len(r) != 1)
         errors.append(
             "style.css: в откате @media область занимает не одну ячейку — "
@@ -529,22 +920,20 @@ def check_narrow_fallback(css: str) -> None:
             "style.css: в откате @media колонка не схлопнута — "
             "нужен grid-template-columns: 1fr, иначе треки остаются 1fr 1.25fr"
         )
-    notes.append(f"Откат в одну колонку на {MIN_WIDTH}px: max-width {breakpoint:g}px")
+    notes.append(f"Откат в одну колонку действует на {MIN_WIDTH}px")
 
 
-def check_fixed_widths(css: str, available: float) -> None:
+def check_fixed_widths(rules, available: float) -> None:
     """Ни одна фиксированная ширина в px не должна быть шире полосы контента.
 
     Это второй, чисто декларативный источник вылета за край: бокс шириной
     320px внутри полосы в 288px не переносится и не сжимается, страница
     получает горизонтальную прокрутку, а правило при этом написано
-    безупречно. Правила @media print не проверяются: на бумаге полоса
-    другая, и ругаться на неё было бы неверно.
+    безупречно. Правила @media print отсечены в live_rules: на бумаге
+    полоса другая, и ругаться на неё было бы неверно.
     """
     widest = 0.0
-    for media, selector, body in css_rules(css):
-        if any("print" in m for m in media):
-            continue
+    for media, selector, body in rules:
         for prop in ("width", "min-width"):
             for value in re.findall(rf"(?<![\w-]){prop}\s*:\s*([\d.]+)px", body):
                 width = float(value)
@@ -559,22 +948,20 @@ def check_fixed_widths(css: str, available: float) -> None:
         notes.append(f"Самая широкая фиксированная ширина: {widest:g}px из {available:g}px")
 
 
-def check_nowrap_runs(css: str, html: str, tokens: dict[str, str], available: float) -> float:
+def check_nowrap_runs(rules, tree: Tree, tokens: dict[str, str], strip: float) -> float:
     """Главная проверка: неразрывная строка обязана влезать в полосу.
+
+    Сверяется не с полосой страницы, а с полосой КОНТЕЙНЕРА: у плитки
+    внутри .spotlight между ней и страницей стоят поля и рамка панели,
+    и 288px ей ничего не говорят.
 
     Возвращает ширину самого широкого бокса — из неё получается та
     минимальная ширина экрана, на которой визитка ещё стоит.
     """
-    rules = css_rules(css)
-    tree = Tree()
-    tree.feed(html)
-
     worst = 0.0
     worst_label = "—"
     measured = 0
-    for media, selector, body in rules:
-        if "white-space" not in body:
-            continue
+    for _, selector, body in rules:
         value = declared(body, "white-space")
         if value is None or "nowrap" not in value:
             continue
@@ -610,8 +997,19 @@ def check_nowrap_runs(css: str, html: str, tokens: dict[str, str], available: fl
                     f"({family}) — строку {text!r} нечем мерить, а она не переносится"
                 )
                 continue
+            try:
+                raising_parts(rules, node, "padding")
+                raising_parts(rules, node, "border")
+                raising_parts(rules, node, "width")
+            except ValueError as e:
+                errors.append(
+                    f"style.css: {selector} — {e}; бокс строки {text!r} посчитан "
+                    "бы без этого правила и вышел бы уже своей настоящей"
+                )
+                continue
             run = advance * font_px * len(text)
             box = run + box_overhead(rules, node, tokens, font_px)
+            available = container_width(rules, node, strip, tokens, font_px)
             measured += 1
             if box > worst:
                 worst = box
@@ -620,14 +1018,15 @@ def check_nowrap_runs(css: str, html: str, tokens: dict[str, str], available: fl
                 errors.append(
                     f"{selector}: неразрывная строка {text!r} — {box:.0f}px "
                     f"({len(text)} знаков × {advance:g}em × {font_px:g}px + "
-                    f"оформление {box - run:.0f}px), а на {MIN_WIDTH}px доступно "
-                    f"{available:g}px. Строка не переносится и вытолкнет страницу "
-                    "за правый край; нужен перенос или сокращение подписи"
+                    f"оформление {box - run:.0f}px), а её контейнер на "
+                    f"{MIN_WIDTH}px отдаёт {available:g}px. Строка не "
+                    "переносится и вытолкнет страницу за правый край; нужен "
+                    "перенос или сокращение подписи"
                 )
     if measured:
         notes.append(
             f"Неразрывных строк измерено: {measured}, самая широкая — "
-            f"{worst_label}: {worst:.0f}px из {available:g}px"
+            f"{worst_label}: {worst:.0f}px"
         )
     return worst
 
@@ -644,11 +1043,19 @@ def main() -> int:
     }
 
     box, side_total, available = content_width(css, tokens)
-    print(f"Обёртка на {MIN_WIDTH}px: {box:g}px, из них поля {side_total:g}px, контенту {available:g}px")
+    print(f"Обёртка на {MIN_WIDTH}px: {box:g}px, из них поля {side_total:g}px, детям {available:g}px")
 
-    check_narrow_fallback(css)
-    check_fixed_widths(css, available)
-    worst = check_nowrap_runs(css, html, tokens, available)
+    # Один раз отсекаются откаты, не действующие на экране MIN_WIDTH, и
+    # дальше все проверки работают с одним и тем же списком правил.
+    rules = live_rules(css)
+    tree = Tree()
+    tree.feed(html)
+
+    check_narrow_fallback(rules)
+    check_fixed_widths(rules, available)
+    check_readable_selectors(rules, tree, tokens)
+    check_flex_rows(rules, tree, tokens, available)
+    worst = check_nowrap_runs(rules, tree, tokens, available)
 
     # Итог одной строкой: так и обещано в докстринге — проверка считает
     # минимальную ширину экрана и сравнивает её с целевой.

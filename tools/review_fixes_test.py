@@ -33,76 +33,140 @@ def check(name: str, ok: bool, detail: str) -> None:
 
 # --- Дефект 1: фокус-кольцо срезается overflow:hidden на .panel -----------
 
-def _rules(css: str) -> list[tuple[int, str, str]]:
-    """Правила файла как (номер по порядку, селектор, тело).
+def _rules(css: str) -> list[tuple[tuple[str, ...], int, str, str]]:
+    """Правила файла как (медиа-цепочка, номер по порядку, селектор, тело).
 
     Порядок в файле — часть каскада, поэтому он и сохраняется: два
     правила одинаковой специфичности решает именно то, которое ниже.
-    Комментарии снимаются, иначе объяснение про -2px посчиталось бы за
-    само объявление.
+    Счётчик сквозной, включая вложенные правила: номер, выданный внутри
+    @media, должен быть БОЛЬШЕ номера всего, что стояло до блока. Иначе
+    правило с отступом 2px внутри @media (max-width: 640px) получило бы
+    меньший номер, чем настоящее -2px выше по файлу, и при равной
+    специфичности проиграло бы — а на экране уже 640px оно как раз и
+    побеждает. Комментарии снимаются, иначе объяснение про -2px
+    посчиталось бы за само объявление.
+
+    ВНУТРЬ @media заходится, а не перескакивается. Раньше любое правило
+    под @media просто выпадало из разбора, и каскад считался по одной
+    лишь широкой половине файла. Условие медиа вычислить нельзя,
+    поэтому решает _worst_case_offset.
     """
-    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
-    out: list[tuple[int, str, str]] = []
-    prelude = ""
-    i, n, order = 0, len(css), 0
-    while i < n:
-        if css[i] == "{":
-            depth, j = 1, i + 1
-            while j < n and depth:
-                if css[j] == "{":
-                    depth += 1
-                elif css[j] == "}":
-                    depth -= 1
-                j += 1
-            selector = " ".join(prelude.split())
-            if selector and not selector.startswith("@"):
-                out.append((order, selector, css[i + 1:j - 1]))
-            order += 1
-            prelude = ""
-            i = j
-        elif css[i] == ";":
-            prelude = ""
-            i += 1
-        else:
-            prelude += css[i]
-            i += 1
+    clean = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    out: list[tuple[tuple[str, ...], int, str, str]] = []
+    counter = [0]
+
+    def walk(source: str, media: tuple[str, ...]) -> None:
+        prelude = ""
+        i, n = 0, len(source)
+        while i < n:
+            if source[i] == "{":
+                depth, j = 1, i + 1
+                while j < n and depth:
+                    if source[j] == "{":
+                        depth += 1
+                    elif source[j] == "}":
+                        depth -= 1
+                    j += 1
+                selector = " ".join(prelude.split())
+                if selector.startswith("@media"):
+                    walk(source[i + 1:j - 1], media + (selector,))
+                elif selector and not selector.startswith("@"):
+                    out.append((media, counter[0], selector, source[i + 1:j - 1]))
+                counter[0] += 1
+                prelude = ""
+                i = j
+            elif source[i] == ";":
+                prelude = ""
+                i += 1
+            else:
+                prelude += source[i]
+                i += 1
+
+    walk(clean, ())
     return out
+
+
+def _declared(body: str, prop: str) -> str | None:
+    """Значение ПОСЛЕДНЕГО объявления prop в теле правила.
+
+    Именно последнего: в каскаде побеждает написанное ниже, а re.search
+    брал первое. Здесь ошибка уходила вбок — к отступу 2px вместо -2px,
+    то есть к провалу на годном коде, — но по счастливой случайности
+    всегда в красную сторону, и заметить её было трудно.
+    """
+    found = re.findall(rf"(?<![\w-]){re.escape(prop)}\s*:\s*([^;{{}}]+)", body)
+    return found[-1].strip() if found else None
 
 
 def _specificity(selector: str) -> tuple[int, int, int]:
     """Специфичность (id, класс, элемент) по Каскаду 2.
 
-    Псевдокласс — это класс, псевдоэлемент — элемент: именно поэтому
-    `.panel .row:focus-visible` (0,3,0) и перебивает `.row:focus-visible`
-    (0,2,0), даже объявленный ниже.
+    Псевдокласс считается классом, псевдоэлемент — элементом: именно
+    поэтому `.panel .row:focus-visible` (0,3,0) перебивает
+    `.row:focus-visible` (0,2,0), даже объявленный ниже.
+
+    Порядок подсчёта важен. Старый вариант искал `[a-zA-Z][\\w-]*` по всей
+    строке и находил `visible` в `.row:focus-visible` (перед ним стоит
+    дефис, а он в класс запрета не входил) и `href` внутри `[href]` —
+    то есть насчитывал лишние элементы: `.row:focus-visible` получался
+    (0,2,1) вместо (0,2,0). Решения это не переворачивало, потому что
+    лишний элемент появлялся у обоих соперников одинаково, но «по
+    Каскаду 2» в докстринге было неправдой. Теперь сначала вырезаются
+    атрибуты, id, классы и псевдоклассы, и остаются одни имена тегов.
     """
-    ids = len(re.findall(r"#[\w-]+", selector))
-    elements = len(re.findall(r"(?<![\w.#:])[a-zA-Z][\w-]*", selector)) + len(re.findall(r"::[\w-]+", selector))
-    classes = len(re.findall(r"\.[\w-]+", selector)) + len(re.findall(r"(?<!:):(?!:)[\w-]+", selector))
+    ids = len(re.findall(r"#[A-Za-z][\w-]*", selector))
+    classes = len(re.findall(r"\.[A-Za-z][\w-]*", selector))
     classes += len(re.findall(r"\[[^\]]*\]", selector))
+    classes += len(re.findall(r"(?<!:):(?!:)[A-Za-z][\w-]*", selector))
+
+    rest = re.sub(r"\[[^\]]*\]", " ", selector)
+    rest = re.sub(r"#[A-Za-z][\w-]*", " ", rest)
+    rest = re.sub(r"\.[A-Za-z][\w-]*", " ", rest)
+    rest = re.sub(r"::[A-Za-z][\w-]*", "x", rest)          # псевдоэлемент — элемент
+    rest = re.sub(r"(?<!:):[A-Za-z][\w-]*", " ", rest)     # псевдокласс — класс
+    elements = len(re.findall(r"(?<![\w-])[A-Za-z][\w-]*", rest))
     return ids, classes, elements
 
 
-def _winning_offset(rules) -> float | None:
-    """Какой outline-offset в итоге получит строка панели.
+def _print_is_harmless(rules) -> bool:
+    """Снимает ли @media print обрезание у .panel.
 
-    Считается каскад, а не ищется подстрока. Разница между этими двумя
-    подходами стоила одного провалившегося теста: правило
-    `.panel .row:focus-visible` с -2px есть, общий список фокуса ниже
-    тоже есть, но стоит ли ПОСЛЕ него — вопрос каскада, и на него
-    отвечает специфичность. Если бы специфичности у правила не было,
-    побеждал бы общий отступ 2px, а правило с -2px так и осталось бы
-    мёртвым — присутствующим в файле и ни на что не влияющим.
-
-    !important поднимается над специфичностью — это единственное
-    объявление, которое перебивает (0,3,0), и пропустить его молча
-    означало бы вернуть обрезанное кольцо под видом защищённого.
+    Печать исключается из худшего случая не по привычке, а потому что
+    на бумаге кольцо обрезать нечем: если print-правило .panel явно
+    ставит overflow: visible, обрезания там нет. Если кто-нибудь это
+    правило снимет, утверждение перестанет быть самоочевидным и печать
+    вернётся в разбор — где она и должна высказать своё.
     """
+    for media, _, selector, body in rules:
+        if not any("print" in m for m in media):
+            continue
+        if ".panel" in selector and re.search(r"overflow\s*:\s*visible", body):
+            return True
+    return False
+
+
+def _worst_case_offset(rules) -> tuple[float | None, str]:
+    """Худший отступ, который строка панели получит хоть где-нибудь.
+
+    Условие @media вычислить нельзя, поэтому все откаты считаются
+    действующими разом: если хоть на одном экране кольцо уедет наружу,
+    страница не годна, даже если на остальных всё верно. Альтернатива —
+    объявить условие неразрешимым и отказаться проверять вовсе, но тогда
+    прогон молчал бы на любой будущей правке отката, а это ровно тот
+    случай, ради которого проверка написана.
+
+    Печать из худшего случая убрана, если _print_is_harmless.
+    """
+    skip_print = _print_is_harmless(rules)
     best: tuple[bool, tuple[int, int, int], int, float] | None = None
-    for order, selector, body in rules:
-        m = re.search(
-            r"(?<![\w-])outline-offset\s*:\s*(-?[\d.]+)px\s*(!important)?", body
-        )
+    where = "—"
+    for media, order, selector, body in rules:
+        if skip_print and any("print" in m for m in media):
+            continue
+        value = _declared(body, "outline-offset")
+        if value is None:
+            continue
+        m = re.match(r"(-?[\d.]+)px\s*(!important)?", value)
         if m is None:
             continue
         for part in selector.split(","):
@@ -112,7 +176,9 @@ def _winning_offset(rules) -> float | None:
             candidate = (bool(m.group(2)), _specificity(part), order, float(m.group(1)))
             if best is None or candidate[:3] > best[:3]:
                 best = candidate
-    return best[3] if best else None
+                where = f"{part} (в {' и '.join(media) if media else 'всегда'})"
+    return (best[3] if best else None), where
+
 
 
 def test_panel_focus_not_clipped() -> None:
@@ -125,9 +191,11 @@ def test_panel_focus_not_clipped() -> None:
     Класс строки сегодня `.row`, а не `.card`: плитка проектов стала
     строкой панели. Поэтому проверка спрашивает не «есть ли правило с
     -2px», а «какой отступ в итоге получит строка внутри панели» — см.
-    _winning_offset. Строка в файле этого не доказывает: мёртвое правило
-    с -2px под общим списком фокуса выглядит в тексте точно так же, как
-    живое, а кольцо при этом срезается по-старому.
+    _worst_case_offset. Строка в файле этого не доказывает: правило с
+    -2px под общим списком фокуса выглядит в тексте точно так же, как
+    живое, а кольцо при этом срезается по-старому. То же и с откатом:
+    override с отступом 2px внутри @media ничем не отличается по тексту
+    от нужного -2px, пока не посчитаешь каскад целиком.
     """
     css = read("css/style.css")
     panel = re.search(r"\.panel\s*\{(.*?)\}", css, re.DOTALL)
@@ -135,7 +203,7 @@ def test_panel_focus_not_clipped() -> None:
 
     has_overflow_hidden = "overflow: hidden" in panel.group(1)
     rules = _rules(css)
-    winner = _winning_offset(rules)
+    winner, where = _worst_case_offset(rules)
 
     if winner is None:
         check(
@@ -150,8 +218,8 @@ def test_panel_focus_not_clipped() -> None:
         "focus-ring not clipped in .panel",
         (not has_overflow_hidden) or winner <= 0,
         f"у .panel есть overflow: hidden, а строка внутри него получает "
-        f"outline-offset: {winner:g}px — кольцо рисуется за пределами строки "
-        "и срезается панелью",
+        f"outline-offset: {winner:g}px (побеждает {where}) — кольцо рисуется "
+        "за пределами строки и срезается панелью",
     )
 
 
