@@ -417,9 +417,40 @@ def check_best_of_shape() -> None:
     if "result__icon" in block:
         errors.append("best of: кубки и медали вернулись — у фоновых мест графики быть не должно")
 
-    for year in ("2026", "2025", "2024", "2023"):
-        if year not in block:
-            errors.append(f"best of: нет выступления за {year} год")
+    # Содержимое панели проверяется тройками «год → событие → место» по
+    # порядку, а не по отдельным подстрокам. Проверка «есть ли где-то на
+    # странице 2026», тем более «есть ли где-нибудь Top 3», ничего не
+    # говорит о том, что панель утверждает: страница, где 2026 стоит
+    # рядом со «Standoff 15», проходит обе молча, и «Top 2» при этом
+    # держался на строке «также», где встречается дважды.
+    #
+    # Порядок — часть проверки, а не её следствие: панель читается от
+    # свежего к старому, и две переставленные строки меняют то, что
+    # страница говорит о годах. Проверка «есть ли такая тройка среди
+    # найденных» такой случай пропускала — обе тройки на месте, переставлены
+    # местами, ошибки нет, а панель теперь утверждает Standoff 15 в 2026.
+    expected = (
+        ("2026", "Standoff 17", "Top 3"),
+        ("2025", "Standoff 15", "Top 2"),
+        ("2024", "Red Team Scenarios", "Top 3"),
+        ("2023", "Standoff 12", "Top 3"),
+    )
+    rows = re.findall(r'<li class="place">(.*?)</li>', block, re.DOTALL)
+    got = [
+        tuple(re.findall(r'<span class="place__(?:year|event|rank)">([^<]*)</span>', row))
+        for row in rows
+    ]
+
+    for i, want in enumerate(expected):
+        have = got[i] if i < len(got) else ()
+        if have != want:
+            errors.append(
+                f"best of: мест №{i + 1} ждёт {want[0]} · {want[1]} · {want[2]}, "
+                f"а стоит {' · '.join(have) if have else 'ничего'} — "
+                "порядок строк и тройки «год → событие → место» обязаны совпадать"
+            )
+    for extra in got[len(expected):]:
+        errors.append(f"best of: лишнее место в панели: {' · '.join(extra)}")
 
     if "class=\"also\"" not in block:
         errors.append("best of: нет приглушённой строки «также»")
