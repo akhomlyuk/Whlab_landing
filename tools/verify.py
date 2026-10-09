@@ -115,9 +115,9 @@ def check_tokens() -> None:
 # пустую страницу вместо визитки.
 REQUIRED_TEXT = (
     "Exited3n",
-    "Pentest, Red team, DFIR",
     "FR13NDS",
     "$ whoami",
+    "Red team · Pentest · DFIR",
     "about",
     "elsewhere",
     "best of",
@@ -157,6 +157,9 @@ REQUIRED_TEXT = (
 FORBIDDEN_TEXT = (
     "Channel Stats",
     "ExIT & EDEN",
+    # Курсор в конце заголовка и висячий промпт убраны решением владельца
+    # 2026-10-09 в пользу префикса-решётки: `$ whoami` рифмуется с `#about`.
+    "Pentest, Red team, DFIR",
     # Форма с запятой не встречается нигде: в подписи hero «пентест и
     # форензика», в био «Пентест и форензика». Запрет остаётся, потому
     # что снятие запрета владельца — это решение, а не молчаливое
@@ -238,6 +241,29 @@ def check_content_is_static() -> None:
             "index.html: в атрибуте d= лежит разметка (d=\"<path ...) — иконка "
             "не отрисовалась бы, а страница выглядела бы исправной"
         )
+
+
+def check_block_hashes() -> None:
+    """Заголовок блока начинается с решётки и не кончится курсором.
+
+    Висячий `_` читался как незакрытый промпт — незаконченная мысль.
+    Решётка в начале читается как рут и рифмуется с `$ whoami` в шапке.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+
+    if "block__caret" in html or "block__caret" in (read_if_present("css/style.css") or ""):
+        errors.append("block__caret вернулся — заголовок блока не должен кончаться курсором")
+
+    titles = re.findall(r'<h2 class="block__title">(.*?)</h2>', html, re.S)
+    if len(titles) != 4:
+        errors.append(f"index.html: заголовков блоков {len(titles)}, ожидалось 4")
+    for t in titles:
+        if 'block__hash' not in t:
+            errors.append(f"заголовок без решётки: {t.strip()[:40]!r}")
+
+    notes.append(f"Заголовков с решёткой: {sum('block__hash' in t for t in titles)} из {len(titles)}")
 
 
 def check_css_sanity() -> None:
@@ -1042,6 +1068,7 @@ def main() -> int:
     check_pages_exist()
     check_external_links()
     check_content_is_static()
+    check_block_hashes()
     check_two_theme_states()
     check_project_icons()
     check_internal_links()
