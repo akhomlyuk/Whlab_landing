@@ -105,9 +105,16 @@ REQUIRED_TEXT = (
     "Exited3n",
     "Pentest, Red team, DFIR",
     "FR13NDS",
+    "$ whoami",
+    "about",
     "elsewhere",
-    "projects",
     "best of",
+    "projects",
+    "10+ лет в информационной безопасности",
+    "Участник команды FR13NDS",
+    "Active Directory",
+    "Пентест и форензика",
+    "156 фильмов",
     "Whitehat Lab",
     "MAX",
     "GitHub",
@@ -115,6 +122,7 @@ REQUIRED_TEXT = (
     "Standoff 365",
     "IT Movies",
     "Whitehat Lab stats",
+    "CTF площадки",
     "Standoff 17",
     "Standoff 15",
     "Standoff 12",
@@ -127,12 +135,14 @@ REQUIRED_TEXT = (
 # Текст, который был на странице и по решению владельца убран. Проверка на
 # отсутствие, а не только на присутствие нужного: иначе удалённая строка
 # вернётся незаметно — вёрстка не сломается и ошибок не будет.
+#
+# Три бывших запрета сняты 2026-10-09: новая спека §3 возвращает био-абзац
+# из старой спеки §8 целиком, вместе с «Участником команды», «Active
+# Directory» и «156 фильмов». Список ниже — только то, что новая спека
+# оставляет запрещённым.
 FORBIDDEN_TEXT = (
-    "Участник команды",
-    "Active Directory",
     "Channel Stats",
-    "Автор каталога из 156",
-    "пентест, форензика",
+    "ExIT & EDEN",
 )
 
 # Эти две убраны именно с карточек в разделе elsewhere. В meta description
@@ -578,6 +588,177 @@ def check_font_charset_coverage() -> None:
             notes.append(f"{fam}: покрывает все {len(needed)} не-ASCII символов страницы")
 
 
+def _srgb_channel(c: float) -> float:
+    """Канал в линейном пространстве по формуле WCAG 2.x."""
+    return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def _luminance(hex_color: str) -> float:
+    """Относительная яркость по WCAG 2.x."""
+    h = hex_color.strip().lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    return 0.2126 * _srgb_channel(r) + 0.7152 * _srgb_channel(g) + 0.0722 * _srgb_channel(b)
+
+
+def _contrast(a: str, b: str) -> float:
+    """Коэффициент контраста двух цветов (WCAG 2.x)."""
+    la, lb = _luminance(a), _luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+# Пары (цвет текста, фон, минимум). Текст — 4.5:1 (WCAG 1.4.3), графика — 3:1
+# (WCAG 1.4.11). Список проверяется в обеих темах: тёмная берётся из :root,
+# светлая — из :root с наложенным [data-theme='light'].
+CONTRAST_PAIRS = (
+    ("--text", "--bg", 4.5),
+    ("--text-strong", "--bg", 4.5),
+    ("--muted", "--bg", 4.5),
+    ("--muted", "--surface", 4.5),
+    ("--accent", "--bg", 4.5),
+    ("--accent", "--surface", 4.5),
+    ("--signal", "--bg", 4.5),
+    ("--signal", "--surface", 4.5),
+    ("--tg", "--surface-2", 3.0),
+    ("--brand-ink", "--surface-2", 3.0),
+    ("--gold", "--surface", 3.0),
+)
+
+
+def check_contrast_pairs() -> None:
+    """Все смысловые цветовые пары держат порог WCAG в обеих темах.
+
+    Контраст считается по формуле, а не на глаз: упал ли он — видно только
+    числом. Новые акценты (голубой --accent, зелёный --signal) и светлое
+    золото проверяются здесь именно поэтому.
+    """
+    tokens = read("css/tokens.css")
+    if tokens is None:
+        return
+
+    root_m = re.search(r":root\s*\{(.*?)\n\}", tokens, re.DOTALL)
+    light_m = re.search(r"\[data-theme='light'\]\s*\{(.*?)\n\}", tokens, re.DOTALL)
+    if root_m is None or light_m is None:
+        errors.append("tokens.css: не найден :root или [data-theme='light']")
+        return
+
+    def block_of(body: str) -> dict[str, str]:
+        # Комментарии вырезаются обязательно. Объяснение про --accent:
+        # внутри комментария выглядит для регулярки как объявление, а
+        # значение тянется до следующей «;» — то есть до следующего
+        # токена, и тот молча пропадает из палитры. На служебном токене
+        # это молчание выглядит как «токен не найден», и виноват оказывается
+        # тот, кто его проверяет, а не тот, кто писал CSS.
+        clean = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
+        return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", clean))
+
+    dark = block_of(root_m.group(1))
+    light = {**dark, **block_of(light_m.group(1))}
+
+    for theme_name, pal in (("тёмная", dark), ("светлая", light)):
+        for fg, bg, need in CONTRAST_PAIRS:
+            fv, bv = pal.get(fg), pal.get(bg)
+            if fv is None or bv is None:
+                errors.append(
+                    f"контраст {theme_name}: токен {fg if fv is None else bg} не найден"
+                )
+                continue
+            if not fv.startswith("#") or not bv.startswith("#"):
+                continue
+            ratio = _contrast(fv, bv)
+            if ratio < need:
+                errors.append(
+                    f"контраст {theme_name}: {fg} ({fv.strip()}) на {bg} "
+                    f"({bv.strip()}) = {ratio:.2f}, нужно ≥ {need}"
+                )
+    notes.append("Контраст-пары: проверены в обеих темах")
+
+
+def check_footer() -> None:
+    """Подвал по спеке §3: копирайт + переключатель темы.
+
+    Переключатель переезжает из header в footer — если переезд забудут
+    совершить, кнопка темы потеряется, а страница останется «рабочей».
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+    m = re.search(r"<footer\b.*?</footer>", html, re.DOTALL)
+    if m is None:
+        errors.append("index.html: нет <footer> — по спеке в подвале копирайт и переключатель темы")
+        return
+    footer = m.group(0)
+    if "data-theme-toggle" not in footer:
+        errors.append("footer: нет переключателя темы — он переехал сюда из header")
+    if "©" not in footer:
+        errors.append("footer: нет копирайта")
+    notes.append("Footer: найден, переключатель на месте")
+
+
+def check_single_column() -> None:
+    """Двухколоночный grid отменён спекой §2 — колонок нет нигде.
+
+    Плотность блоков и есть главная боль владельца; вернувшийся grid
+    вернёт её незаметно, потому что вёрстка при этом останется рабочей.
+    """
+    css = read_if_present("css/style.css")
+    html = read_if_present("index.html")
+    if css is not None:
+        if ".grid" in css:
+            errors.append("style.css: селектор .grid вернулся — двухколоночность отменена спекой")
+        if "repeat(2" in css:
+            errors.append("style.css: repeat(2 — признак двухколоночной сетки, отменена спекой")
+    if html is not None and 'class="grid"' in html:
+        errors.append('index.html: class="grid" вернулся — отменён спекой')
+    notes.append("Одна колонка: grid не найден")
+
+
+def check_hero() -> None:
+    """Hero по спеке §5: строка $ whoami, курсор, две CTA-ссылки.
+
+    Дублирование hero CTA + elsewhere разрешено спекой §7 — поэтому
+    каждая из двух ссылок обязана встретиться на странице дважды.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+    if "$ whoami" not in html:
+        errors.append("index.html: нет строки '$ whoami' над именем в hero")
+    if "hero__cursor" not in html:
+        errors.append("index.html: нет курсора hero__cursor в hero")
+    for url in ("https://t.me/wh_lab", "https://github.com/akhomlyuk"):
+        if html.count(url) < 2:
+            errors.append(
+                f"index.html: {url} должна быть и в hero-CTA, и в elsewhere — "
+                "по спеке §7 дублирование ссылок допустимо, отсутствие одной из точек — нет"
+            )
+    notes.append("Hero: whoami, курсор и CTA проверены")
+
+
+def check_reduced_motion() -> None:
+    """Курсор и hover-подъём обязаны отключаться при prefers-reduced-motion.
+
+    Спека §7 требует буквально: и курсор, и подъём выключаются. Если
+    правила нет, анимация продолжает мигать у людей с вестибулярными
+    нарушениями — тихий дефект, который не виден на обычном прогоне.
+    """
+    css = read_if_present("css/style.css")
+    if css is None:
+        return
+    m = re.search(
+        r"@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{(.*?)\n\}", css, re.DOTALL
+    )
+    if m is None:
+        errors.append("style.css: нет @media (prefers-reduced-motion: reduce)")
+        return
+    block = m.group(1)
+    if "animation: none" not in block:
+        errors.append("reduced-motion: курсор не отключается — нет animation: none")
+    if "transform: none" not in block:
+        errors.append("reduced-motion: hover-подъём не отключается — нет transform: none")
+    notes.append("Reduced-motion: курсор и подъём отключаются")
+
+
 def check_light_palette_consistency() -> None:
     """Два блока светлой палитры обязаны совпадать побайтно.
 
@@ -598,7 +779,11 @@ def check_light_palette_consistency() -> None:
         if m is None:
             errors.append(f"tokens.css: не найден блок {pattern}")
             return {}
-        return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", m.group(1)))
+        # Комментарии вырезаются: «--accent:» в пояснении выглядит для
+        # регулярки как объявление и съедает следующий токен (см.
+        # block_of в check_contrast_pairs).
+        clean = re.sub(r"/\*.*?\*/", "", m.group(1), flags=re.DOTALL)
+        return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", clean))
 
     from_media = block(r"@media\s*\(prefers-color-scheme:\s*light\)\s*\{\s*:root:not\(\[data-theme\]\)\s*\{(.*?)\n  \}")
     explicit = block(r"\[data-theme='light'\]\s*\{(.*?)\n\}")
@@ -631,6 +816,11 @@ def main() -> int:
     check_print_styles()
     check_fonts()
     check_font_charset_coverage()
+    check_contrast_pairs()
+    check_footer()
+    check_single_column()
+    check_hero()
+    check_reduced_motion()
     check_css_sanity()
 
     for n in notes:
