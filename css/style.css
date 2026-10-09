@@ -151,16 +151,42 @@ body {
 
 /* --- Секции ------------------------------------------------------------ */
 
+/* Спека §2: широкий экран — две колонки, projects шире и тянется на обе
+   строки. Названия областей вместо номеров строк: перестановка блоков
+   в разметке не должна ломать раскладку, а области это выражают.
+   Порядок в DOM (hero, about, projects, best, elsewhere) совпадает с
+   порядком на узком экране, поэтому order не нужен нигде. */
 main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-section);
+  display: grid;
+  grid-template-areas:
+    'about projects'
+    'elsewhere projects'
+    'best best';
+  grid-template-columns: 1fr 1.25fr;
+  column-gap: var(--space-6);
+  /* Ряды без общего отступа: у каждого блока своя вертикальная ритмика,
+     а один row-gap на все три ряда растянул бы промежуток между фактами
+     в about до размера секции. */
+  row-gap: 0;
+  align-items: start;
 }
+
+#about     { grid-area: about; }
+#projects  { grid-area: projects; }
+#best      { grid-area: best; }
+#elsewhere { grid-area: elsewhere; }
+
+/* Вертикальные отступы внутри грида задаются полями: в гриде и во flex
+   поля не схлопываются, поэтому ритмика предсказуема — в отличие от
+   margin-top у соседних блочных элементов. */
+#about     { margin-block-end: var(--space-5); }
+#best      { margin-block-start: var(--space-section); }
 
 .block {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
+  min-width: 0;
 }
 
 /* Спека §4: mono 500, висячий _ вместо прежнего префикса «# ».

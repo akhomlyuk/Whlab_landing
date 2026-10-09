@@ -772,22 +772,45 @@ def check_footer() -> None:
     notes.append("Footer: найден, переключатель на месте")
 
 
-def check_single_column() -> None:
-    """Двухколоночный grid отменён спекой §2 — колонок нет нигде.
+def check_two_column_layout() -> None:
+    """Две колонки выше 640px и одна ниже — по спеке §2.
 
-    Плотность блоков и есть главная боль владельца; вернувшийся grid
-    вернёт её незаметно, потому что вёрстка при этом останется рабочей.
+    Плотность была главной болью владельца, но после 2026-10-09 жалоба
+    сменилась на «всё в одну колонку, огромные марджины, ширину не на что
+    деть». Возврат grid без медиа-отката при этом выглядел бы рабочей
+    страницей: на телефоне правая колонка просто уехала бы за край.
     """
     css = read_if_present("css/style.css")
     html = read_if_present("index.html")
-    if css is not None:
-        if ".grid" in css:
-            errors.append("style.css: селектор .grid вернулся — двухколоночность отменена спекой")
-        if "repeat(2" in css:
-            errors.append("style.css: repeat(2 — признак двухколоночной сетки, отменена спекой")
-    if html is not None and 'class="grid"' in html:
-        errors.append('index.html: class="grid" вернулся — отменён спекой')
-    notes.append("Одна колонка: grid не найден")
+    if css is None:
+        return
+
+    if "grid-template-areas" not in css:
+        errors.append("style.css: нет grid-template-areas — раскладка §2 не собрана")
+        return
+
+    areas = "".join(re.findall(r"grid-template-areas:\s*([^;]+);", css, re.DOTALL))
+    flat = re.sub(r'"[^"]*"', "", areas).replace("\n", "")
+    for area in ("about", "projects", "elsewhere", "best"):
+        if area not in flat:
+            errors.append(f"style.css: область {area!r} не объявлена в grid-template-areas")
+
+    # projects обязан тянуться на обе строки левой колонки, иначе about и
+    # elsewhere займут два ряда, а панель окажется в собственном ряду.
+    if not re.search(r"grid-area:\s*projects", css):
+        errors.append("style.css: нет grid-area: projects — панель не закреплена в правой колонке")
+
+    # Медиа-откат: без него телефон получает две колонки.
+    m = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.DOTALL)
+    if m is None:
+        errors.append("style.css: нет @media (max-width: 640px) — на телефоне колонки не схлопнутся")
+    elif "grid-template-areas" not in m.group(1):
+        errors.append("@media 640px: области не перестроены в одну колонку")
+
+    if html is not None and html.count('id="projects"') != 1:
+        errors.append('index.html: раздел projects должен быть ровно один')
+
+    notes.append("Раскладка: области объявлены, медиа-откат на месте")
 
 
 def check_hero() -> None:
@@ -908,7 +931,7 @@ def main() -> int:
     check_contrast_pairs()
     check_link_placement()
     check_footer()
-    check_single_column()
+    check_two_column_layout()
     check_hero()
     check_reduced_motion()
     check_css_sanity()
