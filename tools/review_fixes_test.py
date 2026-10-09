@@ -111,7 +111,8 @@ def test_contrast_pairs_cover_actual_usage() -> None:
         ("--tg", "--surface-2"),
         ("--brand-ink", "--surface"),
         ("--brand-ink", "--surface-2"),
-        ("--gold", "--surface"),
+        # --gold убран из сети вместе с кубками (редизайн 2026-10-09):
+        # пара проверяла бы цвет, которого на странице больше нет.
     }
 
     missing = sorted(required - present)
