@@ -242,6 +242,16 @@ def check_content_is_static() -> None:
             "не отрисовалась бы, а страница выглядела бы исправной"
         )
 
+    # Порядок в DOM = порядок чтения и порядок на узком экране (спека §2.2).
+    # projects поднимается над elsewhere: это самые кликабельные ссылки
+    # страницы, и на телефоне до них должен быть один прокрут, а не три.
+    order = [m.group(1) for m in re.finditer(r'<section class="block" id="([a-z]+)">', html)]
+    if order != ["about", "projects", "best", "elsewhere"]:
+        errors.append(
+            f"index.html: порядок разделов {order}, ожидался "
+            "['about', 'projects', 'best', 'elsewhere']"
+        )
+
 
 def check_block_hashes() -> None:
     """Заголовок блока начинается с решётки и не кончится курсором.
