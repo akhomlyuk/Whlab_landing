@@ -685,22 +685,22 @@ main {
 
   #about, #projects, #best { margin-block-end: var(--space-5); }
 
-  /* Скругления держатся на обрезании: на бумаге углы должны быть
-     прямыми, и панель обязана отдать его содержимому. */
-  .panel,
-  .spotlight {
+  /* Скругление панели держится на обрезании: на бумаге углы должны быть
+     прямыми, и панель обязана отдать этот угол содержимому строк. */
+  .panel {
     border-radius: 0;
     overflow: visible;
   }
 
+  .spotlight { border-radius: 0; }
+
+  /* Блок не должен рваться пополам между страницами. Тени на странице нет
+     (--shadow убран редизайном), поэтому правило охраняет только разрыв. */
   .hero,
   .chip,
   .row,
   .spotlight,
-  .panel {
-    box-shadow: none;
-    break-inside: avoid;
-  }
+  .panel { break-inside: avoid; }
 
   .theme-toggle { display: none; }
 
