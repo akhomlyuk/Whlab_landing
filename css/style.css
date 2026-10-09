@@ -34,15 +34,15 @@ body {
 
 /* --- Hero --------------------------------------------------------------- */
 
-/* Спека §5: hero занимает ~70vh на десктопе, контент прижат к началу —
-   первый экран не должен требовать скролла. align-content держит блоки
-   сверху: justify-content: center съел бы верхний край на длинных hero. */
+/* Hero по высоте контента. Распорка min-height: 70vh была спецификацией
+   старой версии, но при коротком hero она оставляла под ним дыру в
+   пол-экрана, а сверху ещё --space-section — двойной провал перед about.
+   Контент прижат к началу по умолчанию, и первый экран не требует
+   скролла именно потому, что контент идёт сразу за шапкой. */
 .hero {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  align-content: flex-start;
-  min-height: 70vh;
 }
 
 .hero__prompt {
@@ -50,24 +50,6 @@ body {
   font-family: var(--mono);
   font-size: 0.875rem;
   color: var(--muted);
-}
-
-/* Курсор — CSS-блок, а не глиф ▋. Символ U+258B не покрыт
-   unicode-range подключённых шрифтов, и проверка покрытия упала бы;
-   блок рисуется везде одинаково. steps(1) мигает как терминальный
-   курсор, без плавного затухания. */
-.hero__cursor {
-  display: inline-block;
-  width: 0.55em;
-  height: 1em;
-  margin-left: 0.15em;
-  vertical-align: -0.12em;
-  background: var(--accent);
-  animation: cursor-blink 1.1s steps(1) infinite;
-}
-
-@keyframes cursor-blink {
-  50% { opacity: 0; }
 }
 
 /* Аватар слева от имени на десктопе. Спека §5: 64px, radius 12px. */
@@ -121,13 +103,6 @@ body {
 }
 
 .hero__shield svg { width: 0.95em; height: 0.95em; }
-
-.hero__bio {
-  margin: 0;
-  font-size: 1.0625rem;
-  color: var(--text);
-  text-wrap: pretty;
-}
 
 .hero__cta {
   display: flex;
@@ -203,10 +178,36 @@ main {
 
 .block__caret { color: var(--accent); }
 
-.about {
+/* about — список фактов, а не абзац: каждый пункт отвечает на свой
+   вопрос, и ссылка внутри факта остаётся на своём месте при правке
+   соседней строки. */
+.facts {
+  list-style: none;
   margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fact {
   font-size: 1.0625rem;
+  color: var(--text);
   text-wrap: pretty;
+}
+
+.fact__link {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  transition: color 0.15s ease;
+}
+
+.fact__link:hover { color: var(--signal); }
+
+.fact__link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* --- Карточки ---------------------------------------------------------- */
@@ -390,6 +391,15 @@ main {
   color: var(--text-strong);
 }
 
+/* Уточнение к результату: специальный раунд, год издания. Отдельной
+   строкой не выносится — это часть названия, а не соседний факт. */
+.result__note {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
 .result__place {
   flex: none;
   font-family: var(--mono);
@@ -469,6 +479,7 @@ main {
 /* Спека §7: 2px цветом акцента на всех интерактивах. */
 .pill:focus-visible,
 .card:focus-visible,
+.fact__link:focus-visible,
 .theme-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -481,8 +492,6 @@ main {
    держит тап. Отступы секций сползают к нижней границе clamp() сами,
    отдельного правила для них не нужно. */
 @media (max-width: 640px) {
-  .hero { min-height: 0; }
-
   .hero__id {
     flex-direction: column;
     align-items: flex-start;
@@ -499,11 +508,11 @@ main {
 
 /* --- Reduced motion ----------------------------------------------------- */
 
-/* Спека §7: и курсор, и hover-подъём отключаются. Мигающий блок и
-   движение при вестибулярных нарушениях — не украшение, а помеха. */
+/* Спека §7: движение при вестибулярных нарушениях — не украшение, а
+   помеха, поэтому подъём карточек выключается. Мигающего курсора на
+   странице больше нет, выключать нечего. */
 @media (prefers-reduced-motion: reduce) {
-  .hero__cursor { animation: none; }
-  .pill, .card, .theme-toggle { transition: none; }
+  .pill, .card, .theme-toggle, .fact__link { transition: none; }
   .pill:hover, .card:hover { transform: none; }
 }
 
@@ -547,8 +556,6 @@ main {
     box-shadow: none;
     break-inside: avoid;
   }
-
-  .hero { min-height: 0; }
 
   .theme-toggle { display: none; }
 

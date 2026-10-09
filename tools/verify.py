@@ -110,22 +110,24 @@ REQUIRED_TEXT = (
     "elsewhere",
     "best of",
     "projects",
-    "10+ лет в информационной безопасности",
-    "Участник команды FR13NDS",
-    "Active Directory",
-    "Пентест и форензика",
-    "156 фильмов",
-    "Whitehat Lab",
+    "В сфере ИТ с 2010 года",
+    # Фраза разорвана тегом ссылки: «...призёр <a>Standoff 365</a>».
+    # Поэтому проверяются части, а не целая строка — иначе проверка
+    # требовала бы от автора убрать ссылку из факта.
+    "Постоянный участник и призёр",
+    "Standoff 365",
+    "Автор канала",
+    "Атаки на Active Directory",
     "MAX",
     "GitHub",
     "Hackerlab",
-    "Standoff 365",
     "IT Movies",
     "Whitehat Lab stats",
     "CTF площадки",
     "Standoff 17",
     "Standoff 15",
     "Standoff 12",
+    "Standoff Red Team Scenarios",
     "VKACTF",
     "KubanCTF",
     "Cybercoliseum",
@@ -696,6 +698,43 @@ def check_contrast_pairs() -> None:
     notes.append("Контраст-пары: проверены в обеих темах")
 
 
+def check_link_placement() -> None:
+    """Ссылки живут там, куда их поместили, а не где попалось.
+
+    Standoff 365 переехал в about как факт биографии, Telegram остался
+    в hero CTA и about. В ленте ссылок обеих быть не должно: карточка
+    со ссылкой рядом с тем же фактом в about читается как повтор.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+
+    m = re.search(r'<section class="block" id="elsewhere">(.*?)</section>', html, re.DOTALL)
+    if m is None:
+        errors.append("index.html: не найден раздел elsewhere")
+        return
+    elsewhere = m.group(1)
+
+    for label, url in (
+        ("Standoff 365", "standoff365.com/profile/Exited3n/"),
+        ("Whitehat Lab", "t.me/wh_lab"),
+    ):
+        if url in elsewhere:
+            errors.append(
+                f"elsewhere: карточка «{label}» вернулась в ленту ссылок — "
+                f"она живёт в about, дублирование не читается"
+            )
+
+    about = re.search(r'<section class="block" id="about">(.*?)</section>', html, re.DOTALL)
+    if about is None:
+        errors.append("index.html: не найден раздел about")
+        return
+    for url in ("standoff365.com/profile/Exited3n/", "t.me/wh_lab"):
+        if url not in about.group(1):
+            errors.append(f"about: нет ссылки {url} — факт должен быть кликабельным")
+    notes.append("Ссылки: about и elsewhere проверены")
+
+
 def check_footer() -> None:
     """Подвал по спеке §3: копирайт + переключатель темы.
 
@@ -749,15 +788,24 @@ def check_hero() -> None:
         return
     if "$ whoami" not in html:
         errors.append("index.html: нет строки '$ whoami' над именем в hero")
-    if "hero__cursor" not in html:
-        errors.append("index.html: нет курсора hero__cursor в hero")
-    for url in ("https://t.me/wh_lab", "https://github.com/akhomlyuk"):
+    # Мигающий курсор убран решением владельца 2026-10-09: анимация
+    # мигала вопреки просьбе и раздражала. Проверка остаётся, чтобы он
+    # не вернулся вместе с правкой оформления hero.
+    if "hero__cursor" in html or "cursor-blink" in html:
+        errors.append("index.html: курсор в строке '$ whoami' вернулся — он убран по решению владельца")
+    # Дубль: факт «с 2010 года» живёт в about, в hero повторять его незачем.
+    if "10+ лет в информационной безопасности" in html:
+        errors.append(
+            "index.html: строка «10+ лет в информационной безопасности» вернулась "
+            "в hero — она дублирует факт из about"
+        )
+    # Ссылка на профиль Standoff уехала в about, из ленты ссылок убрана.
+    for url, where in (
+        ("https://github.com/akhomlyuk", "hero-CTA и elsewhere"),
+    ):
         if html.count(url) < 2:
-            errors.append(
-                f"index.html: {url} должна быть и в hero-CTA, и в elsewhere — "
-                "по спеке §7 дублирование ссылок допустимо, отсутствие одной из точек — нет"
-            )
-    notes.append("Hero: whoami, курсор и CTA проверены")
+            errors.append(f"index.html: {url} должна быть в {where}")
+    notes.append("Hero: whoami, отсутствие курсора и CTA проверены")
 
 
 def check_reduced_motion() -> None:
@@ -777,11 +825,14 @@ def check_reduced_motion() -> None:
         errors.append("style.css: нет @media (prefers-reduced-motion: reduce)")
         return
     block = m.group(1)
-    if "animation: none" not in block:
-        errors.append("reduced-motion: курсор не отключается — нет animation: none")
+    # animation: none больше не требуется: мигающий курсор убран
+    # решением владельца, анимации на странице не осталось. Проверять
+    # нечего — требовало бы только выдуманного правила в CSS.
+    if re.search(r"animation\s*:[^;}]*\binfinite", block):
+        errors.append("reduced-motion: бесконечная анимация не отключается")
     if "transform: none" not in block:
         errors.append("reduced-motion: hover-подъём не отключается — нет transform: none")
-    notes.append("Reduced-motion: курсор и подъём отключаются")
+    notes.append("Reduced-motion: подъём отключается, анимаций нет")
 
 
 def check_light_palette_consistency() -> None:
@@ -842,6 +893,7 @@ def main() -> int:
     check_fonts()
     check_font_charset_coverage()
     check_contrast_pairs()
+    check_link_placement()
     check_footer()
     check_single_column()
     check_hero()
