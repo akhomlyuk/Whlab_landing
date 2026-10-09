@@ -140,14 +140,17 @@ REQUIRED_TEXT = (
     "IT Movies",
     "Whitehat Lab stats",
     "CTF-площадки",
-    "Standoff 17",
-    "Standoff 15",
-    "Standoff 12",
-    "Standoff Red Team Scenarios",
+    # Достижения переехали в панель Standoff (2026-10-09, Task 7): годы и
+    # названия площадок больше не строки списка, а содержимое плиток и одна
+    # приглушённая строка «также:». Проверяются поэтому не «Standoff 17»,
+    # а то, что из достижений действительно осталось на странице.
     "VKACTF",
     "KubanCTF",
     "Cybercoliseum",
-    "HackTheBox",
+    "Top 3",
+    "Top 2",
+    "призёр · площадка PHDays",
+    "также:",
 )
 
 # Текст, который был на странице и по решению владельца убран. Проверка на
@@ -382,6 +385,46 @@ def check_project_icons() -> None:
             if not (ROOT / url).exists():
                 errors.append(f"projects: иконка не найдена на диске: {url}")
     notes.append(f"Строк проектов с иконкой: {len(with_icon)} из {len(rows)}")
+
+
+def check_best_of_shape() -> None:
+    """Standoff собран в одну панель, остальное — одной приглушённой строкой.
+
+    Разбивка достижений по годам прятала Standoff в трёх разных местах:
+    он попадал в 2026, в 2025 и в 2024, и не читался как одна история.
+    Владелец назвал его главным, всё остальное — фоном, поэтому у
+    первых мест нет ни кубков, ни медалей: отдельная графика сделала бы
+    VKACTF и KubanCTF равными.
+    """
+    html = read_if_present("index.html")
+    if html is None:
+        return
+
+    # Раздел best несёт модификатор block--panel, как и projects, поэтому
+    # класс секции ищется той же формой, что и в остальных проверках файла
+    # (см. check_project_icons): точное `class="block"` не нашло бы раздел
+    # и проверка ругалась бы «не найден раздел best» на годной разметке.
+    m = re.search(r'<section class="block(?:\s[^"]*)?" id="best">(.*?)</section>', html, re.DOTALL)
+    if m is None:
+        errors.append("index.html: не найден раздел best")
+        return
+    block = m.group(1)
+
+    if "spotlight" not in block:
+        errors.append("best of: нет панели .spotlight — Standoff обязан быть собран в одно место")
+    if "year__label" in block:
+        errors.append("best of: разбивка по годам вернулась — Standoff снова расползётся по трём местам")
+    if "result__icon" in block:
+        errors.append("best of: кубки и медали вернулись — у фоновых мест графики быть не должно")
+
+    for year in ("2026", "2025", "2024", "2023"):
+        if year not in block:
+            errors.append(f"best of: нет выступления за {year} год")
+
+    if "class=\"also\"" not in block:
+        errors.append("best of: нет приглушённой строки «также»")
+
+    notes.append("Best of: Standoff в одной панели, остальное фоном")
 
 
 def check_internal_links() -> None:
@@ -707,6 +750,10 @@ CONTRAST_PAIRS = (
     # Текст на фоне
     ("--text", "--bg", 4.5),
     ("--text", "--surface", 4.5),
+    # Плитки мест в панели Standoff лежат на --surface-2 и рисуются
+    # --text: подложка вложена в панель на один уровень глубже, чем у
+    # строк projects, и пара с --surface её не покрывает.
+    ("--text", "--surface-2", 4.5),
     ("--text-strong", "--bg", 4.5),
     ("--muted", "--bg", 4.5),
     ("--muted", "--surface", 4.5),
@@ -1235,6 +1282,7 @@ def main() -> int:
     check_block_hashes()
     check_two_theme_states()
     check_project_icons()
+    check_best_of_shape()
     check_internal_links()
     check_theme()
     check_auto_theme_fallback()

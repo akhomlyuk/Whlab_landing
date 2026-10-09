@@ -415,67 +415,84 @@ main {
 
 /* --- best of ------------------------------------------------------------ */
 
-.years {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-5);
+.spotlight {
+  background: var(--surface);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
 }
 
-.year__label {
-  margin: 0 0 var(--space-2);
-  font-family: var(--mono);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
-.results {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-
-.result {
+.spotlight__head {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  background: var(--surface);
-  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
 }
 
-.result__icon {
+.spotlight__icon {
   flex: none;
-  width: var(--space-5);
-  height: var(--space-5);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  background: var(--surface-2);
   color: var(--accent);
 }
 
-.result__icon svg { width: 100%; height: 100%; }
-
-.result__name {
-  flex: 1 1 auto;
-  min-width: 0;
-  color: var(--text-strong);
+.spotlight__icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
-/* Уточнение к результату: специальный раунд, год издания. Отдельной
-   строкой не выносится — это часть названия, а не соседний факт. */
-.result__note {
-  display: block;
+.spotlight__name {
   font-family: var(--mono);
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.spotlight__note {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 
-.result__place {
-  flex: none;
+.places {
+  list-style: none;
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.place {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--surface-2);
+  border-radius: var(--radius);
   font-family: var(--mono);
   font-size: 0.875rem;
+  color: var(--text);
+}
+
+.place__year { color: var(--muted); }
+.place__event { color: var(--text); }
+.place__rank { color: var(--accent); font-weight: 600; }
+
+/* Фоновые места: приглушённая строка под панелью. Разница масштаба
+   с панелью и есть весь смысл — Standoff читается первым без
+   цветовых пятен. */
+.also {
+  margin: var(--space-4) 0 0;
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  line-height: 1.75;
   color: var(--muted);
 }
 
@@ -647,7 +664,6 @@ main {
 
   .hero,
   .card,
-  .result,
   .panel {
     box-shadow: none;
     break-inside: avoid;
