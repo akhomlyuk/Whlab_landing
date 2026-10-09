@@ -690,7 +690,10 @@ def check_footer() -> None:
     footer = m.group(0)
     if "data-theme-toggle" not in footer:
         errors.append("footer: нет переключателя темы — он переехал сюда из header")
-    if "©" not in footer:
+    # Копирайт принимается и символом, и сущностью: &copy; в исходнике
+    # выглядит для проверки иначе, чем рисунок на странице, и ругаться
+    # на корректный HTML было бы проверкой формы записи, а не намерения.
+    if "©" not in footer and "&copy;" not in footer:
         errors.append("footer: нет копирайта")
     notes.append("Footer: найден, переключатель на месте")
 
