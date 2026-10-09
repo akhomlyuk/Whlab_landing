@@ -435,9 +435,17 @@ def check_best_of_shape() -> None:
         ("2024", "Red Team Scenarios", "Top 3"),
         ("2023", "Standoff 12", "Top 3"),
     )
-    rows = re.findall(r'<li class="place">(.*?)</li>', block, re.DOTALL)
+    # Модификаторы в списках классов допускаются, и на этот раз проверка сама
+    # на них наступает: `<li class="place place--new">` и
+    # `<span class="place__rank" data-year="2026">` — правки, которые ничего
+    # не меняют в том, что панель утверждает, а точный класс их отбрасывал и
+    # страница роняла четыре ошибки ни о чём. Та же форма, что у соседних
+    # проверок файла (`class="row(?:\s[^"]*)?"` в check_project_icons,
+    # `class="block(?:\s[^"]*)?"` для разделов), и по той же причине:
+    # `\s` отсекает подставные `class="places"`, а кавычка после класса — нет.
+    rows = re.findall(r'<li class="place(?:\s[^"]*)?">(.*?)</li>', block, re.DOTALL)
     got = [
-        tuple(re.findall(r'<span class="place__(?:year|event|rank)">([^<]*)</span>', row))
+        tuple(re.findall(r'<span class="place__(?:year|event|rank)"[^>]*>([^<]*)</span>', row))
         for row in rows
     ]
 
@@ -449,8 +457,14 @@ def check_best_of_shape() -> None:
                 f"а стоит {' · '.join(have) if have else 'ничего'} — "
                 "порядок строк и тройки «год → событие → место» обязаны совпадать"
             )
-    for extra in got[len(expected):]:
-        errors.append(f"best of: лишнее место в панели: {' · '.join(extra)}")
+    # Номер лишнего места — его собственный индекс, а не хвост: сообщение
+    # обязано указывать на строку, которую добавили, иначе виновным читается
+    # последнее из ожидаемых мест.
+    for i in range(len(expected), len(got)):
+        errors.append(
+            f"best of: мест №{i + 1} лишнее: {' · '.join(got[i])} — "
+            "в панели четыре выступления Standoff"
+        )
 
     if "class=\"also\"" not in block:
         errors.append("best of: нет приглушённой строки «также»")
