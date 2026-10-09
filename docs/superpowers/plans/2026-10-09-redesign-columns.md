@@ -367,7 +367,15 @@ Expected: FAIL: `index.html: не найден текст 'Red team · Pentest �
 .block__hash { color: var(--accent); }
 ```
 
-- [ ] **Step 5: Запустить проверку**
+- [ ] **Step 5: Обновить строку роли в шапке**
+
+Новая проверка требует `Red team · Pentest · DFIR` в разметке, поэтому строку под именем надо поменять уже здесь, а не в задаче 5. В `index.html` замените текст внутри `.hero__role`, оставив щит и подпись `Cybersecurity enthusiast` на месте:
+
+```html
+      <p class="hero__role">Red team · Pentest · DFIR<span class="hero__sep" aria-hidden="true"> · </span><span class="hero__tag"><span class="hero__shield" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" focusable="false"><path d="M12 2.8 20 5.9v5.6c0 4.6-3.3 7.6-8 9.7-4.7-2.1-8-5.1-8-9.7V5.9z"/></svg></span>Cybersecurity enthusiast</span></p>
+```
+
+- [ ] **Step 6: Запустить проверку**
 
 Run: `python tools/verify.py`
 Expected: FAIL только на `@media 640px` из Task 2. Проверка заголовков — зелёная.
@@ -393,7 +401,7 @@ git commit -m "Hash-prefix block titles instead of a trailing caret"
 
 - [ ] **Step 1: Добавить падающую проверку порядка**
 
-В `tools/verify.py` в функцию `check_content_is_static` добавьте в конец, перед `return`:
+В `tools/verify.py` в функцию `check_content_is_static` добавьте в конец, перед `return`. Проверка добавляется здесь впервые; задача 5 к ней не возвращается и дублировать её не нужно.
 
 ```python
     # Порядок в DOM = порядок чтения и порядок на узком экране (спека §2.2).
@@ -817,10 +825,11 @@ git commit -m "Header links as rectangles, facts reordered, links as chips"
 
 ```python
     # Панель проектов и строка Standoff лежат на --surface, а не на --bg:
-    # --accent и --muted на этой подложке раньше не рисовались.
-    ("--text", "--surface", 4.5),
+    # --accent и --muted на этой подложке раньше не рисовались. Пара
+    # --text/--surface в списке уже есть, повторно не добавляется.
     ("--accent", "--surface", 4.5),
     ("--muted", "--surface", 4.5),
+)
 ```
 
 - [ ] **Step 2: Запустить проверку**
