@@ -772,6 +772,20 @@ def check_footer() -> None:
     notes.append("Footer: найден, переключатель на месте")
 
 
+def _grid_area_rows(css: str) -> list[list[str]]:
+    """Строки всех grid-template-areas из куска CSS, как списки имён.
+
+    Вид кавычки не важен: страница пишет области в одинарных, но
+    проверка не должна ломаться от их смены на двойные — регулярка
+    принимает и те, и другие. Объявление обрывается точкой с запятой, а
+    не переводом строки, поэтому многострочная запись разбирается целиком.
+    """
+    rows: list[list[str]] = []
+    for decl in re.findall(r"grid-template-areas\s*:(.*?);", css, re.DOTALL):
+        rows.extend(row.split() for row in re.findall(r"['\"]([^'\"]*)['\"]", decl))
+    return rows
+
+
 def check_two_column_layout() -> None:
     """Две колонки выше 640px и одна ниже — по спеке §2.
 
@@ -779,6 +793,14 @@ def check_two_column_layout() -> None:
     сменилась на «всё в одну колонку, огромные марджины, ширину не на что
     деть». Возврат grid без медиа-отката при этом выглядел бы рабочей
     страницей: на телефоне правая колонка просто уехала бы за край.
+
+    Эта проверка — приёмка Task 4, поэтому судит она о раскладке, а не о
+    наличии строк в файле: «области перестроены» означает, что внутри
+    @media каждая строка области состоит из одного имени, а колонка
+    схлопнута до одной. Области, повторяющие широкую раскладку, и
+    «перестроенные» области при оставшихся 1fr 1.25fr дают телефону
+    либо две колонки, либо трек шириной во весь экран — и обе ошибки
+    раньше проходили молча.
     """
     css = read_if_present("css/style.css")
     html = read_if_present("index.html")
@@ -789,28 +811,70 @@ def check_two_column_layout() -> None:
         errors.append("style.css: нет grid-template-areas — раскладка §2 не собрана")
         return
 
-    areas = "".join(re.findall(r"grid-template-areas:\s*([^;]+);", css, re.DOTALL))
-    flat = re.sub(r'"[^"]*"', "", areas).replace("\n", "")
+    media = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.DOTALL)
+
+    # Широкая раскладка читается из файла за вычетом медиа-блока: как
+    # только Task 4 допишет в него свои области, они окажутся одноимёнными
+    # с широкими, и счёт «панель тянется на обе строки» посчитал бы и их —
+    # сломав ровно ту проверку, которая объясняет, зачем areas нужны.
+    wide = css if media is None else css[:media.start()] + css[media.end():]
+    rows = _grid_area_rows(wide)
+
+    names = {name for row in rows for name in row}
     for area in ("about", "projects", "elsewhere", "best"):
-        if area not in flat:
+        if area not in names:
             errors.append(f"style.css: область {area!r} не объявлена в grid-template-areas")
 
-    # projects обязан тянуться на обе строки левой колонки, иначе about и
-    # elsewhere займут два ряда, а панель окажется в собственном ряду.
+    # Панель обязана стоять в обоих рядах правой колонки, иначе about и
+    # elsewhere займут два ряда, а панель окажется в собственном. Считаются
+    # строки области, а не ищется объявление grid-area: при раскладке
+    # 'elsewhere about' панель уезжает в третий ряд, страница остаётся
+    # рабочей, а grid-area: projects на месте — и проверка молчит.
+    spanned = sum("projects" in row for row in rows)
+    if spanned != 2:
+        errors.append(
+            "style.css: projects не тянется на обе строки правой колонки — "
+            f"ожидалось два ряда с projects, в области их {spanned} из {len(rows)}"
+        )
+
+    # grid-area нужен отдельно от областей: сами области только называют
+    # ячейки, а без явного закрепления #projects авторазмещение положило бы
+    # панель в первую свободную — левую — ячейку.
     if not re.search(r"grid-area:\s*projects", css):
         errors.append("style.css: нет grid-area: projects — панель не закреплена в правой колонке")
 
-    # Медиа-откат: без него телефон получает две колонки.
-    m = re.search(r"@media\s*\(max-width:\s*640px\)\s*\{(.*?)\n\}", css, re.DOTALL)
-    if m is None:
+    # Медиа-откат: без него телефон получает две колонки. Договорённость с
+    # Task 4: внутри @media — grid-template-areas одним именом в строке и
+    # grid-template-columns: 1fr (или none).
+    narrow_ok = False
+    if media is None:
         errors.append("style.css: нет @media (max-width: 640px) — на телефоне колонки не схлопнутся")
-    elif "grid-template-areas" not in m.group(1):
-        errors.append("@media 640px: области не перестроены в одну колонку")
+    else:
+        block = media.group(1)
+        narrow_rows = _grid_area_rows(block)
+        if not narrow_rows:
+            errors.append("@media 640px: области не перестроены в одну колонку")
+        elif fat_row := next((r for r in narrow_rows if len(r) != 1), None):
+            errors.append(
+                "@media 640px: области не перестроены в одну колонку — строка "
+                f"{' '.join(fat_row)!r} занимает {len(fat_row)} ячейки"
+            )
+        elif not re.search(r"grid-template-columns\s*:\s*(?:none|1fr)\s*;", block):
+            errors.append(
+                "@media 640px: области перестроены, но колонка не схлопнута — "
+                "нужен grid-template-columns: 1fr"
+            )
+        else:
+            narrow_ok = True
 
     if html is not None and html.count('id="projects"') != 1:
         errors.append('index.html: раздел projects должен быть ровно один')
 
-    notes.append("Раскладка: области объявлены, медиа-откат на месте")
+    # Заметка — только когда обе половины сошлись. Без этого прогон печатал
+    # «медиа-откат на месте» в одной строке с «ОШИБКА: @media 640px:
+    # области не перестроены», то есть отмашку, которой не было.
+    if narrow_ok:
+        notes.append("Раскладка: области объявлены, медиа-откат на месте")
 
 
 def check_hero() -> None:
