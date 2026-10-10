@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>og:image</title>
+<!-- Шаблон превью. Правь его и запускай `python tools/og_image.py`.
+
+     Цвета подставляет скрипт из css/tokens.css — здесь только имена токенов
+     вида {{--accent}}. Разделение сделано так, чтобы превью и страница
+     брали цвет из одного места: новое правило в tokens.css меняет и то и
+     другое сразу.
+
+     Шрифты подставляются скриптом как абсолютные file://-ссылки, потому
+     что страница собирается во временной папке, а шрифты лежат в static/.
+     Текст на карточке набирается теми же файлами, что и на whlab.ru. -->
+<style>
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('{{FONT_MONO}}') format('woff2');
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: 'Ubuntu';
+    src: url('{{FONT_SANS}}') format('woff2');
+    font-weight: 700;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 1200px;
+    height: 630px;
+    overflow: hidden;
+  }
+
+  body {
+    background: {{--bg}};
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    display: flex;
+    align-items: center;
+    padding: 56px;
+  }
+
+  /* Плитка повторяет карточки страницы: та же подложка и та же рамка.
+     Радиус здесь крупнее, чем --radius-lg на странице, и это осознанно:
+     карточка 1200px в ширину, и её собственный 14px на таком размере
+     читаются как почти прямой угол. Пропорция, а не значение, та же. */
+  .card {
+    width: 100%;
+    background: {{--surface}};
+    border: 1px solid {{--border}};
+    border-radius: 24px;
+    padding: 64px 72px;
+    display: flex;
+    flex-direction: column;
+    height: 518px;
+  }
+
+  .name {
+    font-family: 'Ubuntu', sans-serif;
+    font-weight: 700;
+    /* 88px — около того, чем имя набиралось на странице до редизайна.
+       На самой странице оно теперь 48px, но на превью это единственный
+       крупный элемент и он должен читаться в ленте на телефоне, где
+       картинку видят шириной с ноготь. */
+    font-size: 88px;
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    color: {{--text-strong}};
+    display: flex;
+    align-items: baseline;
+  }
+
+  /* Решётка в тон заголовкам блоков страницы — так превью узнаётся
+     как часть визитки, а не как отдельная картинка. */
+  .hash { color: {{--accent}}; margin-right: 0.6em; }
+
+  .role {
+    margin-top: 20px;
+    font-size: 27px;
+    color: {{--muted}};
+  }
+
+  /* Строка о стаже — из блока about, не выдумка: превью должно
+     показывать то, что откроется по ссылке. Заодно она закрывает
+     полосу пустоты, которая оставалась между ролью и подвалом. */
+  .since {
+    margin-top: 10px;
+    font-size: 22px;
+    color: {{--muted}};
+  }
+
+  /* Подвал не прижат к низу: при margin-top:auto между блоком сверху и
+     ним оставалась пустота в половину карточки, и превью читалось как
+     пустая рамка с именем в углу. */
+  .foot {
+    margin-top: 72px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .domain {
+    font-size: 30px;
+    color: {{--accent}};
+  }
+
+  /* Подпись канала: на странице это первая строка панели проектов и
+     главный переход, ради которого визитку и делают. */
+  .tag {
+    font-size: 22px;
+    color: {{--muted}};
+  }
+
+  .tag b { color: {{--text-strong}}; font-weight: 400; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="name"><span class="hash">#</span>Exited3n</div>
+    <div class="role">Red team · Pentest · DFIR</div>
+    <div class="since">В сфере ИТ с 2010 года · призёр Standoff</div>
+    <div class="foot">
+      <div class="domain">whlab.ru</div>
+      <div class="tag"><b>Whitehat Lab</b> · CTF-площадки · stats · movies</div>
+    </div>
+  </div>
+</body>
+</html>

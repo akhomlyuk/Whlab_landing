@@ -1621,6 +1621,79 @@ def check_light_palette_consistency() -> None:
             )
 
 
+def check_og_image_fresh() -> None:
+    """Превью для соцсетей обязано собираться из текущей палитры.
+
+    Картинка og:image была сделана руками один раз и с тех пор жила
+    бинарём: правки страницы её не трогали, и к моменту редизайна на ней
+    остались зелёный `$` из удалённой эстетики и строка «10+ лет в
+    информационной безопасности», которой на странице уже нет. Скрипт
+    tools/og_image.py закрывает эту дыру, но только если им пользуются —
+    поэтому здесь превью пересобирается и сверяется байт в байт.
+
+    Рендер требует Edge и Pillow, которых на машине проверки может не
+    быть (например, в CI на Linux). Тогда проверка молча пропускается и
+    говорит об этом: требовать браузер ради ассетов — значит сделать
+    verify.py непроходимым на половине машин.
+    """
+    target = ROOT / "static" / "ogimage.webp"
+    script = ROOT / "tools" / "og_image.py"
+    if not script.exists():
+        errors.append("tools/og_image.py отсутствует — превью нечем пересобрать")
+        return
+    if not target.exists():
+        return  # существование файла проверяет check_meta
+
+    try:
+        from PIL import features  # noqa: F401
+    except ImportError:
+        notes.append("Превью: Pillow не установлен, проверка свежести пропущена")
+        return
+    if not features.check("webp"):
+        notes.append("Превью: Pillow без webp, проверка свежести пропущена")
+        return
+
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    if not any(p.exists() for p in (
+        Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+        Path(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"),
+    )):
+        notes.append("Превью: Edge не найден, проверка свежести пропущена")
+        return
+
+    keep = target.read_bytes()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            # Скрипт пишет по месту; отодвигаем текущий файл и сравниваем
+            # с тем, что соберётся заново из нынешних токенов.
+            target.write_bytes(b"")
+            rc = subprocess.run(
+                [sys.executable, str(script)], capture_output=True, timeout=120, cwd=ROOT
+            )
+            fresh = target.read_bytes()
+    finally:
+        target.write_bytes(keep)
+
+    if rc.returncode != 0 or not fresh:
+        notes.append(
+            "Превью: пересборка не удалась, свежесть не проверена "
+            f"({rc.stderr.decode(errors='replace')[:120].strip()})"
+        )
+        return
+
+    if fresh != keep:
+        errors.append(
+            "static/ogimage.webp не соответствует текущей палитре — "
+            "запусти `python tools/og_image.py` и закоммичь результат"
+        )
+    else:
+        notes.append("Превью: совпадает с текущей палитрой")
+
+
 def main() -> int:
     check_tokens()
     check_light_palette_consistency()
@@ -1646,6 +1719,7 @@ def main() -> int:
     check_hero()
     check_reduced_motion()
     check_no_literals_outside_tokens()
+    check_og_image_fresh()
     check_css_sanity()
 
     for n in notes:
