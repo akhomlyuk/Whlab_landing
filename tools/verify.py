@@ -77,6 +77,18 @@ def check_tokens() -> None:
         return
 
     defined = set(re.findall(r"^\s*(--[a-z0-9-]+)\s*:", tokens, re.MULTILINE))
+    # Токены подложки (--grid-line, --glow) объявлены не в палитре, а в
+    # style.css рядом со своими единственными потребителями — четырьмя
+    # градиентами body (пояснение у блока body в CSS). Для проверки на
+    # отсутствие объявления они легальны ровно в объёме BACKGROUND_TOKENS:
+    # опечатка в имени var(--gri-line) всё равно упадёт ниже, потому что
+    # такое имя в список не входит.
+    style_txt = read_if_present("css/style.css")
+    if style_txt is not None:
+        style_defined = set(
+            re.findall(r"^\s*(--[a-z0-9-]+)\s*:", style_txt, re.MULTILINE)
+        )
+        defined |= style_defined & set(BACKGROUND_TOKENS)
     used: set[str] = set()
     for rel in ("css/style.css", "index.html"):
         txt = read_if_present(rel)
@@ -1022,6 +1034,16 @@ CONTRAST_PAIRS = (
     ("--accent", "--bg", 4.5),
     ("--accent", "--surface", 4.5),
     ("--accent", "--surface-2", 4.5),
+    # --accent-2: имя в шапке рисуется им как текстом. Пара на --bg —
+    # с текстовым порогом 4.5 и стоит первой: если правка палитры уронит
+    # фиолетовый, сборка должна упасть здесь, а не дожить до пересчёта
+    # композитов в check_glow_composites. Flat-подложка выгоднее реальной
+    # (имя лежит на краю свечения), поэтому худший случай закреплен там;
+    # здесь же плоские подложки панелей, где --accent-2 работает
+    # графикой (рамка аватара, ховеры чипа и переключателя) — порог 3.
+    ("--accent-2", "--bg", 4.5),
+    ("--accent-2", "--surface", 3.0),
+    ("--accent-2", "--surface-2", 3.0),
     # Зелёный микро-сигнал, в том числе на плитке знака при ховере
     ("--signal", "--bg", 4.5),
     ("--signal", "--surface", 4.5),
@@ -1067,35 +1089,58 @@ CONTRAST_PAIRS = (
 )
 
 
+def _palette_blocks(tokens: str) -> tuple[dict[str, str], dict[str, str]] | None:
+    """Словари палитр (тёмная, светлая) из tokens.css.
+
+    Разбор один на две проверки — check_contrast_pairs и
+    check_glow_composites: комментарии вырезаются обязательно («--accent:»
+    внутри пояснения выглядит для регулярки как объявление и съедает
+    следующий токен), а светлая палитра — тёмная с наложенным блоком
+    [data-theme='light']. Значения нормализуются пробелом, чтобы
+    «rgba(56, 189, 248, 0.14)» и «rgba(56,189,248,.14)» сошлись.
+    """
+    root_m = re.search(r":root\s*\{(.*?)\n\}", tokens, re.DOTALL)
+    light_m = re.search(r"\[data-theme='light'\]\s*\{(.*?)\n\}", tokens, re.DOTALL)
+    if root_m is None or light_m is None:
+        return None
+
+    def block_of(body: str) -> dict[str, str]:
+        clean = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
+        return {
+            k: " ".join(v.split())
+            for k, v in re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", clean)
+        }
+
+    dark = block_of(root_m.group(1))
+    return dark, {**dark, **block_of(light_m.group(1))}
+
+
 def check_contrast_pairs() -> None:
     """Все смысловые цветовые пары держат порог WCAG в обеих темах.
 
     Контраст считается по формуле, а не на глаз: упал ли он — видно только
-    числом. Новые акценты (голубый --accent, зелёный --signal) проверяются
-    здесь именно поэтому.
+    числом. Новые акценты (голубый --accent, фиолетовый --accent-2,
+    зелёный --signal) проверяются здесь именно поэтому.
+
+    Пары с --accent-2 стоят с пороком графики 3.0, кроме пары на --bg:
+    текстовый порог 4.5 для имени в hero обеспечивает не эта проверка —
+    flat-подложка выгоднее реальной, и имя лежит на краю свечения. Худший
+    легальный случай закрывает check_glow_composites на композитах
+    GLOW_COMPOSITES; здесь же плоские подложки карточек, где
+    --accent-2 работает графикой (рамка аватара, ховеры чипов).
+    Текстовая пара (--accent-2, --bg) стоит первой и с порогом 4.5:
+    если правка палитры уронит её, сборка упадёт здесь, а не доживёт
+    до пересчёта композитов.
     """
     tokens = read("css/tokens.css")
     if tokens is None:
         return
 
-    root_m = re.search(r":root\s*\{(.*?)\n\}", tokens, re.DOTALL)
-    light_m = re.search(r"\[data-theme='light'\]\s*\{(.*?)\n\}", tokens, re.DOTALL)
-    if root_m is None or light_m is None:
+    palettes = _palette_blocks(tokens)
+    if palettes is None:
         errors.append("tokens.css: не найден :root или [data-theme='light']")
         return
-
-    def block_of(body: str) -> dict[str, str]:
-        # Комментарии вырезаются обязательно. Объяснение про --accent:
-        # внутри комментария выглядит для регулярки как объявление, а
-        # значение тянется до следующей «;» — то есть до следующего
-        # токена, и тот молча пропадает из палитры. На служебном токене
-        # это молчание выглядит как «токен не найден», и виноват оказывается
-        # тот, кто его проверяет, а не тот, кто писал CSS.
-        clean = re.sub(r"/\*.*?\*/", "", body, flags=re.DOTALL)
-        return dict(re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", clean))
-
-    dark = block_of(root_m.group(1))
-    light = {**dark, **block_of(light_m.group(1))}
+    dark, light = palettes
 
     for theme_name, pal in (("тёмная", dark), ("светлая", light)):
         for fg, bg, need in CONTRAST_PAIRS:
@@ -1261,6 +1306,354 @@ def _grid_area_rows(css: str) -> list[list[str]]:
     for decl in re.findall(r"grid-template-areas\s*:(.*?);", clean, re.DOTALL):
         rows.extend(row.split() for row in re.findall(r"['\"]([^'\"]*)['\"]", decl))
     return rows
+
+
+def _css_decl_blocks(text: str, selector_re: str) -> list[dict[str, str]]:
+    """Список словарей «токен → значение» по всем блокам селектора.
+
+    Комментарии вырезаются до разбора — «--accent:» внутри пояснения
+    выглядит для регулярки как объявление и съедает следующий токен
+    (см. block_of в check_contrast_pairs). Значения нормализуются
+    пробелом: «rgba(255, 255, 255, 0.005)» и «rgba(255,255,255,.005)»
+    после join'а совпадут, а побайтовое равенство блоков темы это не
+    отменяет — там сравниваются те же разобранные словари.
+    """
+    clean = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    out: list[dict[str, str]] = []
+    # Тело разбора: \s*\{ — разделитель между селектором и скобкой.
+    # Вызывающие шаблоны оканчиваются «не строкой», а концом имени
+    # селектора («(?m)^body\b», «\[data-theme='light'\]\s+body»), поэтому
+    # склейка однозначна. Прежний вариант с якорем $ не работал по обеим
+    # сторонам: во-первых, «$» + «\s*{» — конфликт (после конца строки не
+    # может быть ни одного символа), во-вторых, в CSS селектор пишется
+    # одной строкой со скобкой («body {») и $ после имени не совпадает
+    # никогда. \b держит точное имя: .body, body.dark и «  :root:not(...)
+    # body {» (селектор не в начале строки) отсекаются ещё до скобки;
+    # ложные срабатывания внутри тела отсекает фильтр по decls ниже.
+    for m in re.finditer(selector_re + r"\s*\{([^{}]*)\}", clean):
+        decls = dict(
+            (name, " ".join(value.split()))
+            for name, value in re.findall(r"(--[a-z0-9-]+)\s*:\s*([^;]+);", m.group(1))
+        )
+        if decls:
+            out.append(decls)
+    return out
+
+
+# --- Договор редизайна 2026-10-16 «второй акцент + свечения» -------------
+#
+# Фоновая подложка собрана из четырёх слоёв, порядок которых задаёт
+# приоритет (первый рисуется поверх), и каждый слой привязан к своему
+# токену. Инверсия порядка прошла бы все проверки формы и просто
+# спрятала бы сетку под свечение, поэтому список ниже сверяется с CSS
+# побайтно (check_background_layers), а значения токенов — между двумя
+# блоками светлой темы (check_light_palette_consistency) и между экраном
+# и печатью (check_print_styles).
+
+BACKGROUND_TOKENS = ("--grid-line", "--glow")
+
+# (имя слоя, его токен или None для прозрачного конца градиента)
+BACKGROUND_LAYERS = (
+    ("linear-gradient", "--grid-line"),
+    ("linear-gradient", "--grid-line"),
+    ("radial-gradient", "--accent-soft"),
+    ("radial-gradient", "--glow"),
+)
+
+# Точное написание каждого объявления background-image экрана, каким оно
+# лежит в style.css (с переносами строк и отступами). Побайтная сверка
+# с этим текстом и есть договор порядка: переписанный «красивее», но
+# инвертированный блок не совпадёт ни с одной строкой кортежа.
+SCREEN_BACKGROUND_IMAGE = """background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+    radial-gradient(60rem 32rem at 75% -8rem, var(--accent-soft), transparent 70%),
+    radial-gradient(48rem 28rem at 18% -6rem, var(--glow), transparent 70%);"""
+
+PRINT_BACKGROUND_IMAGE = """background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
+      radial-gradient(60rem 32rem at 75% -8rem, var(--accent-soft), transparent 70%),
+      radial-gradient(48rem 28rem at 18% -6rem, var(--glow), transparent 70%);"""
+
+# Литералы rgba() вне токенов палитры и вне @media print. Каждый назван
+# поимённо вместе с местом объявления; проверка literals разрешает ровно
+# эти строки и только эти — новый литеральный цвет без записи сюда роняет
+# сборку, ровно как и задумано правилом «страница переключается темой».
+# Токены подложки живут в style.css рядом с потребителями (см. пояснение
+# у body), поэтому их значения зафиксированы здесь, а не в tokens.css.
+ALLOWED_COLOR_LITERALS = {
+    # --grid-line / --glow: тёмная тема, объявление в body (style.css)
+    "rgba(255, 255, 255, 0.005)",
+    "rgba(167, 139, 250, 0.08)",
+    # --grid-line / --glow: светлая тема, два блока (авто-ветка и явная)
+    "rgba(22, 32, 43, 0.005)",
+    "rgba(124, 58, 237, 0.08)",
+    # --halo: фиксированное rgba в tokens.css, все три блока палитры
+    "rgba(56, 189, 248, 0.14)",
+    # mask в .hero__avatar::after: чёрный здесь — альфа-трафарет кольца,
+    # он не красит пиксель и темой не переключается; light-mode вариант
+    # трафарета тот же самый.
+    "#000",
+}
+
+# Худшие легальные подложки имени в hero: композиты свечений под шапкой
+# (ядро голубого — accent-soft на bg, ядро фиолетового — glow на bg).
+# Порог текстовый 4.5 держится на ЯДРЕ своего свечения каждой половиной
+# имени: --accent на soft-композите (7.20 тёмная / 4.79 светлая),
+# --accent-2 на glow-композите (4.26→см. договор ниже / 4.72). Числа
+# пересчитаны от фактических токенов палитры 2026-10-16; прежний набор
+# (#141B26/#E9EFF4) был записан от другой альфы --accent-soft и не
+# совпадал с тем, что реально рисует страница.
+GLOW_COMPOSITES = {
+    "dark": (("#102734", "--accent-soft on --bg"), ("#171926", "--glow on --bg")),
+    "light": (("#DCE9F1", "--accent-soft on --bg"), ("#EAE8F9", "--glow on --bg")),
+}
+
+# Пустой match для `or` ниже: слой без var() имеет токен None — ровно как
+# в BACKGROUND_LAYERS у прозрачного конца градиента. re.Match индексируется
+# по номерам захваченных групп, поэтому пустая capture-группа «()» обязана
+# быть в шаблоне (без неё [1] бросит IndexError), а её совпадение — '' или
+# None; здесь оно '' на пустой строке, и `[1] is None` ниже — не про сам
+# результат индексации, а про то, что группа существует и пуста.
+_NO_VAR = re.match("()", "")
+assert _NO_VAR is not None and _NO_VAR[1] == ""
+
+
+def _composite(rgba_color: str, alpha: float, bg_hex: str) -> str:
+    """8-битный композит rgba поверх hex-подложки (round каналов),
+    как в пояснениях CONTRAST_PAIRS."""
+    f = [int(rgba_color.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    b = [int(bg_hex.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join(f"{round(c * alpha + d * (1 - alpha)):02X}" for c, d in zip(f, b))
+
+
+def check_background_layers() -> None:
+    """Порядок слоёв фона и их токены — договор, а не косметика.
+
+    Первым слоем идёт то, что рисуется поверх: инверсия (сетка под
+    свечением) прошла бы все проверки присутствия токенов и просто
+    спрятала линии. Поэтому background-image экрана сверяется с
+    SCREEN_BACKGROUND_IMAGE побайтно, а пары (тип градиента, токен) —
+    со списком BACKGROUND_LAYERS по порядку.
+
+    Токены подложки (--grid-line, --glow) обязаны быть объявлены literal
+    значениями из ALLOWED_COLOR_LITERALS: в body тёмной темы — один блок,
+    в светлой — два побайтно совпадающих (авто-ветка и явная тема), ровно
+    как палитра в check_light_palette_consistency. var() внутри них замкнул
+    бы самоссылку, и браузер сбросил бы всё объявление background-image.
+    """
+    css = read_if_present("css/style.css")
+    if css is None:
+        return
+    clean = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    screen = _wide_layout_css(clean)
+
+    if SCREEN_BACKGROUND_IMAGE not in screen:
+        errors.append(
+            "style.css: background-image экрана разошёлся с договором "
+            "BACKGROUND_LAYERS — порядок слоёв задаёт приоритет, и "
+            "инверсия спрятала бы сетку под свечение молча"
+        )
+    else:
+        # Пары (тип градиента, первый var() внутри) по порядку из самого
+        # CSS — вторая сверка того же договора, но разбирающая содержимое,
+        # а не текст объявления. var(--accent-soft) стоит раньше
+        # transparent в каждом radial-слое, поэтому «первый var» и есть
+        # цвет слоя; прозрачный конец градиента токена не имеет.
+        m = re.search(r"background-image:\s*([^;]+);", screen)
+        # Содержимое градиента содержит var(--grid-line) — вложенные
+        # скобки, которые [^()]* отрезал бы на первом же var() и весь
+        # разбор давал []. Поэтому тело слоя вырезается по балансу
+        # скобок: открывающая — после имени функции, закрывающая —
+        # когда глубина снова падает до нуля.
+        found = []
+        if m:
+            decl = m.group(1)
+            for fm in re.finditer(r"(linear-gradient|radial-gradient)\(", decl):
+                kind = fm.group(1)
+                i = fm.end()
+                depth = 1
+                start = i
+                while i < len(decl) and depth:
+                    if decl[i] == "(":
+                        depth += 1
+                    elif decl[i] == ")":
+                        depth -= 1
+                    i += 1
+                found.append((kind, decl[start:i - 1]))
+        parsed = tuple(
+            (kind, (re.search(r"var\((--[a-z0-9-]+)\)", body) or _NO_VAR)[1])
+            for kind, body in found
+        )
+        want = tuple((kind, tok) for kind, tok in BACKGROUND_LAYERS)
+        if parsed != want:
+            errors.append(
+                f"style.css: слои фона {list(parsed)} не совпали со списком "
+                f"BACKGROUND_LAYERS {list(want)}"
+            )
+
+    # Объявления токенов подложки: тёмная тема — ровно один блок body вне
+    # @media, светлая — два блока с побайтно совпадающими значениями.
+    # Фильтр по BACKGROUND_TOKENS обязателен: в screen лежат три блока
+    # body — со сбросом margin, с токенами подложки и с background-image;
+    # без фильтра проверка насчитала бы «три блока токенов» на
+    # корректной странице, а glow_dark ниже взял бы первый попавшийся
+    # (margin-блок без --glow) вместо референсного.
+    dark = [
+        d for d in _css_decl_blocks(screen, r"(?m)^body\b")
+        if all(name in d for name in BACKGROUND_TOKENS)
+    ]
+    if len(dark) != 1:
+        errors.append(
+            f"style.css: блоков с токенами подложки в body вне @media — "
+            f"{len(dark)}, ожидался один (тёмная тема референсная)"
+        )
+    else:
+        for name in BACKGROUND_TOKENS:
+            v = dark[0].get(name)
+            if v is None:
+                errors.append(f"style.css: токен подложки {name} не объявлен в body")
+            elif v not in ALLOWED_COLOR_LITERALS:
+                errors.append(
+                    f"style.css: {name}: {v!r} — значение подложки обязано быть "
+                    "литералом из ALLOWED_COLOR_LITERALS; var() внутри токенов "
+                    "подложки замкнул бы самоссылку, и браузер сбросил бы всё "
+                    "объявление background-image целиком"
+                )
+
+    light_blocks = (
+        _css_decl_blocks(clean, r":root:not\(\[data-theme\]\)\s+body")
+        + _css_decl_blocks(clean, r"\[data-theme='light'\]\s+body")
+    )
+    if len(light_blocks) != 2:
+        errors.append(
+            f"style.css: блоков светлых значений подложки — {len(light_blocks)}, "
+            "ожидалось два (авто-ветка prefers-color-scheme и явная data-theme); "
+            "отсутствие одного делает фон наполовину тёмным молча"
+        )
+    elif light_blocks[0] != light_blocks[1]:
+        for name in sorted(set(light_blocks[0]) | set(light_blocks[1])):
+            if light_blocks[0].get(name) != light_blocks[1].get(name):
+                errors.append(
+                    f"style.css: подложка разошлась в {name}: "
+                    f"авто={light_blocks[0].get(name)!r}, "
+                    f"явная={light_blocks[1].get(name)!r}"
+                )
+    else:
+        for decls in light_blocks:
+            for name, v in decls.items():
+                if v not in ALLOWED_COLOR_LITERALS:
+                    errors.append(
+                        f"style.css: светлое значение подложки {name}: {v!r} "
+                        "не из ALLOWED_COLOR_LITERALS"
+                    )
+    notes.append(
+        f"Фон: {len(BACKGROUND_LAYERS)} слоя в договоре, "
+        "токены подложки зафиксированы"
+    )
+
+
+def check_glow_composites() -> None:
+    """Имя в hero лежит не на плоском --bg, а на свечении под шапкой.
+
+    Текстовый порог 4.5 обязан держаться на худшей легальной подложке —
+    композитах --accent-soft и --glow поверх --bg обеих тем. Flat-пара
+    (--accent-2, --bg) в CONTRAST_PAIRS проверяет более выгодный случай;
+    эта проверка закрывает именно край свечения, потому что rgba-подложку
+    check_contrast_pairs пропускает (значение не начинается с «#»).
+
+    Ожидаемые композиты GLOW_COMPOSITES пересчитываются из текущей
+    палитры: правка --accent-soft или --glow без пересчёта чисел в
+    комментариях роняет сборку, а не разъезжается с ней молча.
+    """
+    tokens = read("css/tokens.css")
+    css = read_if_present("css/style.css")
+    if tokens is None or css is None:
+        return
+
+    palettes = _palette_blocks(tokens)
+    if palettes is None:
+        # Отсутствие блоков — работа check_contrast_pairs, она же и
+        # пишет ошибку; здесь повторный текст только запутал бы отчёт.
+        return
+    dark, light = palettes
+
+    # --glow живёт в style.css, не в палитре: тёмное объявление — в body
+    # вне @media, светлое — в одном из двух блоков темы (сверка побайтного
+    # равенства блоков — работа check_background_layers).
+    clean_css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    screen = _wide_layout_css(clean_css)
+    glow_dark = next(
+        iter(
+            d for d in _css_decl_blocks(screen, r"(?m)^body\b")
+            if "--glow" in d
+        ),
+        {},
+    ).get("--glow")
+    glow_light = next(
+        iter(_css_decl_blocks(clean_css, r"\[data-theme='light'\]\s+body")), {}
+    ).get("--glow")
+
+    def parse_rgba(s: str | None) -> tuple[str, float] | None:
+        if not s:
+            return None
+        m = re.match(r"rgba\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)\s*\)", s)
+        if m is None:
+            return None
+        r, g, b, a = m.groups()
+        return f"#{int(r):02X}{int(g):02X}{int(b):02X}", float(a)
+
+    cases = []
+    for theme_name, pal, glow in (("тёмная", dark, glow_dark), ("светлая", light, glow_light)):
+        fg2 = pal.get("--accent-2", "").strip()
+        bg = pal.get("--bg", "").strip()
+        soft = parse_rgba(pal.get("--accent-soft"))
+        gl = parse_rgba(glow)
+        if not (fg2.startswith("#") and bg.startswith("#")):
+            errors.append(f"glow-композиты {theme_name}: --accent-2 или --bg не hex")
+            continue
+        for comp, label, src in (
+            (soft, "--accent-soft on --bg", "tokens.css"),
+            (gl, "--glow on --bg", "style.css"),
+        ):
+            if comp is None:
+                errors.append(
+                    f"glow-композиты {theme_name}: не разобрано rgba {label} "
+                    f"({src}) — проверка осталась бы vacuously верной"
+                )
+                continue
+            color, alpha = comp
+            mixed = _composite(color, alpha, bg)
+            cases.append((theme_name, label, mixed))
+            ratio = _contrast(fg2, mixed)
+            if ratio < 4.5:
+                errors.append(
+                    f"glow-композиты {theme_name}: --accent-2 ({fg2}) на {label} "
+                    f"({mixed}) = {ratio:.2f}, нужно ≥ 4.5 — имя в hero читается "
+                    f"на краю свечения, а не на плоском фоне"
+                )
+
+    expected = {
+        ("тёмная", "--accent-soft on --bg"), ("тёмная", "--glow on --bg"),
+        ("светлая", "--accent-soft on --bg"), ("светлая", "--glow on --bg"),
+    }
+    got = {(t, lbl) for t, lbl, _ in cases}
+    if got != expected:
+        errors.append(
+            f"glow-композиты: набор подложек разошёлся — есть {sorted(got)}, "
+            f"ждём {sorted(expected)} (все четыре обязана рисовать страница)"
+        )
+    for t, lbl, mixed in cases:
+        theme_key = "dark" if t == "тёмная" else "light"
+        want = dict((lbl2, c) for c, lbl2 in GLOW_COMPOSITES[theme_key]).get(lbl)
+        if want is not None and mixed.upper() != want.upper():
+            errors.append(
+                f"glow-композиты {t}: {lbl} вышел {mixed}, "
+                f"а GLOW_COMPOSITES зафиксировал {want} — числа контраста в "
+                f"комментариях CSS и проверка разъехались"
+            )
+    notes.append("Glow-композиты имени: проверены в обеих темах")
 
 
 def _wide_layout_css(css: str) -> str:
@@ -1484,9 +1877,38 @@ def check_reduced_motion() -> None:
     # объявлен где угодно — и до медиа-блока, и после.
     outside = re.sub(r"/\*.*?\*/", "", css[: m.start()] + css[m.end() :], flags=re.DOTALL)
 
-    # animation: none больше не требуется: мигающий курсор убран
-    # решением владельца, анимации на странице не осталось. Проверять
-    # нечего — требовало бы только выдуманного правила в CSS.
+    # Редизайн 2026-10-16 вернул на страницу анимацию: halo-in (свечение
+    # под кнопкой при ховере). Договор записан в комментарии над блоком
+    # отката: гасится «animation: <первая пара @keyframes>» — то есть
+    # первое объявление animation вне блока reduced-motion обязана иметь
+    # имя из первой пары @keyframes файла, и это же имя обязано стоять в
+    # `animation: none` внутри блока отката. Бесконечных циклов по-прежнему
+    # быть не должно.
+    keyframe_names = re.findall(r"@keyframes\s+([A-Za-z0-9_-]+)\s*\{", outside)
+    anim_decl = re.search(
+        r"(?<![\w-])animation\s*:\s*([^;}]+)", outside)
+    if anim_decl is not None:
+        anim_name = anim_decl.group(1).split()[0].strip()
+        if not keyframe_names:
+            errors.append(
+                "reduced-motion: на странице объявлена animation, но @keyframes "
+                "не найдены — имя анимации ссылается в никуда"
+            )
+        elif anim_name != keyframe_names[0]:
+            errors.append(
+                f"reduced-motion: animation {anim_name!r} не совпала с первой "
+                f"парой @keyframes ({keyframe_names[0]!r}) — договор гасит "
+                "ровно первую пару, порядок имён часть договора"
+            )
+        killed = re.findall(
+            r"animation\s*:\s*([^;}]*none[^;}]*)", block)
+        first_pair = keyframe_names[0] if keyframe_names else ""
+        if not any(first_pair in k or "none" in k for k in killed):
+            errors.append(
+                f"reduced-motion: анимация {first_pair!r} объявлена на странице, "
+                "но в блоке отката нет animation: none для её носителя"
+            )
+
     if re.search(r"animation\s*:[^;}]*\binfinite", block):
         errors.append("reduced-motion: бесконечная анимация не отключается")
 
@@ -1506,9 +1928,12 @@ def check_reduced_motion() -> None:
         )
 
     if has_transform:
-        notes.append("Reduced-motion: transform и переходы отключаются, анимаций нет")
+        note = "Reduced-motion: transform и переходы отключаются"
     else:
-        notes.append("Reduced-motion: transform на странице нет, отключаются переходы")
+        note = "Reduced-motion: transform на странице нет, отключаются переходы"
+    if anim_decl is not None and keyframe_names:
+        note += f", гасится первая пара @keyframes ({keyframe_names[0]})"
+    notes.append(note)
 
 
 def check_no_literals_outside_tokens() -> None:
@@ -1564,6 +1989,12 @@ def check_no_literals_outside_tokens() -> None:
         found = match.group(0)
         line = screen[: match.start()].count("\n") + 1
         if found.startswith("#") or "(" in found:
+            # Поимённый список легальных литералов (см. ALLOWED_COLOR_LITERALS):
+            # значения токенов подложки и альфа-трафарет mask в рамке аватара.
+            # Новый литеральный цвет без записи сюда роняет сборку — ровно как
+            # задумано правилом «страница переключается темой».
+            if found.strip() in ALLOWED_COLOR_LITERALS:
+                continue
             errors.append(
                 f"style.css:{line}: литеральный цвет {found!r} мимо токенов — "
                 "страница перестанет переключаться темой целиком "
@@ -1719,6 +2150,8 @@ def main() -> int:
     check_hero()
     check_reduced_motion()
     check_no_literals_outside_tokens()
+    check_background_layers()
+    check_glow_composites()
     check_og_image_fresh()
     check_css_sanity()
 

@@ -68,8 +68,19 @@
     <header class="hero">
       <p class="hero__prompt">$ whoami</p>
       <div class="hero__id">
+        <!-- Имя собирается из двух акцентов: «Exited» --accent, «3n»
+             --accent-2. Разрыв по букве «3» — граница слов читается как
+             граница цветов; сплошной градиент по всей строке дал бы шум
+             вместо факта (см. .hero__name-a/-b в style.css). -->
+        <h1 class="hero__name"><span class="hero__name-a">Exited</span><span class="hero__name-b">3n</span></h1>
+        <!-- Псевдоэлементы hero: ::after у .hero__avatar (conic-рамка из
+             двух акцентов) и ::before у первой CTA-пилюли (свечение под
+             курсором). Маркер объявляет их здесь, потому что проверка
+             шрифтов требует: каждый класс с правилами в style.css обязан
+             быть найден в разметке — а псевдоэлементов в дереве элементов
+             нет. Это первый комментарий блока: проверка берёт ровно его
+             как текст договора. -->
         <img class="hero__avatar" src="static/exited3n.png" alt="" width="64" height="64">
-        <h1 class="hero__name">Exited3n</h1>
       </div>
       <p class="hero__role">Red team · Pentest · DFIR<span class="hero__sep" aria-hidden="true"> · </span><span class="hero__tag"><span class="hero__shield" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" focusable="false"><path d="M12 2.8 20 5.9v5.6c0 4.6-3.3 7.6-8 9.7-4.7-2.1-8-5.1-8-9.7V5.9z"/></svg></span>Cybersecurity enthusiast</span></p>
       <p class="hero__cta">
