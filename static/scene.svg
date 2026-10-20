@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Standalone copy of assets/mark.svg: a browser loads this on its own, with
+       no page CSS to resolve var() against, so both colours are hardcoded.
+
+       A four-bar level meter, four shapes cut out of a square tile, in the
+       order below. That order is the mark's reading order and it is the order
+       tools/check_mark_copies.py compares, so a copy that reorders two bars is
+       a different mark rather than the same one shuffled. The checker reads
+       ellipses as well as rects even though this file has none: it learned to
+       during a mark of three notes that was measured against this one and then
+       dropped, and a reader that cannot see half the shapes it can be asked
+       about is worse than one that knows it cannot.
+
+       The four literals are the palette, two themes by two fills, read off the
+       token blocks in css/style.css: the tile is each theme's accent and the
+       cut is each theme's bg, because the mark-tile and mark-cut aliases are
+       exactly those two.
+
+       Token names are spelled without their leading hyphens in this comment
+       on purpose. XML forbids a double hyphen inside a comment, and a browser
+       that cannot parse the file renders no favicon at all rather than a
+       malformed one. tools/check_mark_copies.py asserts it for both SVGs.
+
+       What this file cannot do is follow the site's theme. The switch here is
+       prefers-color-scheme, which asks the operating system; the in-page marks
+       follow data-theme, which the reader sets with the theme control and which
+       is stored in localStorage under scene-theme. The two disagree in both
+       directions and there is no way to close that from a static asset: a
+       reader on a dark OS looking at the site in light theme gets the
+       dark-flavoured favicon, and a reader on a light OS looking at the site in
+       dark theme gets the light one. It is a known limitation, not a bug to
+       chase. favicon.ico and apple-touch-icon.png are static in the same way and
+       go further: neither format has any way to ask the question, so
+       tools/make_brand_assets.py bakes the dark pair into both. -->
+  <style>
+    .tile { fill: #ff8a42; }
+    .cut  { fill: #0f0d0b; }
+    @media (prefers-color-scheme: light) {
+      .tile { fill: #a85015; }
+      .cut  { fill: #efe9e1; }
+    }
+  </style>
+  <rect class="tile" x="1" y="1" width="30" height="30" rx="0"/>
+  <g class="cut">
+    <rect x="4.0"  y="22" width="4.2" height="6"/>
+    <rect x="10.6" y="14" width="4.2" height="14"/>
+    <rect x="17.2" y="19" width="4.2" height="9"/>
+    <rect x="23.8" y="7"  width="4.2" height="21"/>
+  </g>
+</svg>
