@@ -18,21 +18,22 @@ body {
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 
-  /* Подложка страницы в четырёх слоях: сетка из двух взаимно
-     перпендикулярных градиентов и два размытых пятна за содержимым.
+  /* Подложка страницы: сетка из двух взаимно перпендикулярных градиентов.
+     Порядок слоёв читается снизу вверх: первым идёт самый дальний.
 
-     Порядок важен и читается снизу вверх: первыми идут самые дальние
-     слои. Сетка первая — она фоновая фактура, её не должно быть видно
-     поверх пятен, иначе пятна исчезнут. Габариты заданы в px: это
-     абсолютные размеры, а не отступы, и rem здесь означал бы, что сетка
-     дышит вместе с шириной окна. */
+     Два размытых пятна (голубое и фиолетовое) убраны 2026-10-28. Они
+     давали мягкий свет в верхних углах, но это ровно та пара цветов,
+     по которой страницу узнают как собранную нейросетью: синий и
+     фиолетовый радиальные градиенты. Плоский фон с сеткой читается
+     спокойнее, и глубина осталась у фактуры, а не у свечения.
+
+     Габариты сетки заданы в px: это абсолютные размеры, а не отступы,
+     и rem здесь означал бы, что сетка дышит вместе с шириной окна. */
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px),
-    radial-gradient(900px 480px at 75% -120px, var(--accent-soft), transparent 70%),
-    radial-gradient(720px 420px at 18% -90px, var(--glow), transparent 70%);
-  background-size: 32px 32px, 32px 32px, auto, auto;
-  background-repeat: repeat, repeat, no-repeat, no-repeat;
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 32px 32px, 32px 32px;
+  background-repeat: repeat, repeat;
   /* fixed — сетка не едет при скролле. Минус известен: на мобильных
      браузерах фон с fixed перерисовывается на всё прокручивание, и
      дешёвый первый экран становится дорогим. На 32px-текстуре разница
@@ -40,6 +41,28 @@ body {
      первым делом отключать надо именно эту строку. */
   background-attachment: fixed;
 }
+
+/* --- Переход к содержимому ---------------------------------------------- */
+
+/* Ссылка нужна только клавиатуре и скринридеру: мышью её не достать.
+   clip-path вместо отрицательного left — элемент остаётся в дереве
+   доступности и в порядке обхода, но не занимает места на экране.
+   На фокусе показывается поверх шапки, в левом верхнем углу. */
+.skip {
+  position: fixed;
+  top: var(--space-4);
+  left: var(--space-4);
+  z-index: 1;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-strong);
+  text-decoration: none;
+  clip-path: inset(50%);
+}
+
+.skip:focus { clip-path: none; }
 
 /* Ширина страницы, спека §2: min(1040px, 100% - 2rem), где 1040px —
    это --wrapper-max из tokens.css. Отступ по бокам входит в
@@ -61,10 +84,14 @@ body {
    старой версии, но при коротком hero она оставляла под ним дыру в
    пол-экрана, а сверху ещё --space-section — двойной провал перед about.
    Контент прижат к началу по умолчанию, и первый экран не требует
-   скролла именно потому, что контент идёт сразу за шапкой. */
+   скролла именно потому, что контент идёт сразу за шапкой.
+
+   Сетка, а не флекс: с 900px шапка повторяет колонки страницы, и одна
+   раскладка должна уметь обе. До 900px это одна колонка — порядок в DOM
+   совпадает с порядком на экране, поэтому order нигде не нужен. */
 .hero {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr;
   gap: var(--space-4);
 }
 
@@ -115,6 +142,23 @@ body {
   color: var(--muted);
 }
 
+/* Роль и кнопки — один блок: на широком экране он уезжает во вторую
+   колонку целиком, а не по частям. До 900px блок стоит в общей колонке,
+   и его gap совпадает с gap шапки — на глаз это те же 16px между
+   строками, что и раньше. */
+.hero__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Точка-разделитель живёт внутри .hero__tag, а не перед ним. Разметка
+   «DFIR<span> · </span><span>щит …</span>» на 320–420px переносила строку
+   после точки: браузер добивал первую строку всем, что влезало, и
+   последней возможностью переноса оказывался стык перед щитом. Строка
+   кончалась висячей точкой, вторая начиналась со щита — разделитель
+   читался как обрубок списка. Внутри неразрывного .hero__tag точка
+   физически не может оторваться от того, что разделяет. */
 .hero__tag { white-space: nowrap; }
 
 /* Щит неразрывен со словом «enthusiast»: перенос разорвал бы связку
@@ -134,7 +178,35 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
-  margin: var(--space-2) 0 0;
+  margin: 0;
+}
+
+/* С 900px шапка повторяет сетку страницы: имя в левой колонке, роль и
+   кнопки — в правой. Без этого на 1440 справа от имени оставалось 580px
+   пустоты, и первый экран читался как обрезанный по центру.
+
+   Колонки те же, что у main — 1fr / 1.25fr с тем же column-gap. Правый
+   край шапки совпадает с правым краем панели projects, и глаз ведёт по
+   одной вертикали сверху вниз; при других пропорциях шапка и содержимое
+   разъехались бы на десять пикселей, что заметно без линейки.
+
+   900px — не произвол: роль в моно 14px занимает около 460px, и ниже
+   этого порога правая колонка перестаёт вмещать её в одну строку.
+   Медиа-условие отдельное от 640px: основной грид складывается раньше,
+   потому что ему хватает и 700px, а шапке нужен запас на длинную роль. */
+@media (min-width: 900px) {
+  .hero {
+    grid-template-columns: 1fr 1.25fr;
+    grid-template-areas:
+      'prompt prompt'
+      'id     meta';
+    column-gap: var(--space-6);
+    align-items: start;
+  }
+
+  .hero__prompt { grid-area: prompt; }
+  .hero__id     { grid-area: id; }
+  .hero__meta   { grid-area: meta; }
 }
 
 /* --- CTA-пилюли -------------------------------------------------------- */
@@ -155,11 +227,19 @@ body {
   color: var(--text-strong);
   font-weight: 500;
   text-decoration: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition: border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              background 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pill:hover {
-  border-color: var(--signal);
+  border-color: var(--accent);
+}
+
+/* Отклик на нажатие. Не transform: на странице нет ни одного transform
+   намеренно, и правило reduced-motion охраняет именно это обещание.
+   Смена фона даёт тот же отклик и не двигает вёрстку. */
+.pill:active {
+  background: var(--surface-2);
 }
 
 /* Telegram и GitHub в шапке оформлены одинаково — решение владельца от
@@ -231,8 +311,16 @@ main {
 
 /* Вертикальные отступы внутри грида задаются полями: в гриде и во flex
    поля не схлопываются, поэтому ритмика предсказуема — в отличие от
-   margin-top у соседних блочных элементов. */
-#about     { margin-block-end: var(--space-5); }
+   margin-top у соседних блочных элементов.
+
+   Отступ между about и elsewhere несёт нижний блок, а не верхний.
+   Причина в распределении лишней высоты: projects тянется на два ряда,
+   и если он выше левой колонки, браузер делит разницу между рядами —
+   отступ получался 100px вместо заявленных 24, и это читалось дырой.
+   Токен на месте стыка делает шов таким же, как перед best of, и
+   оставляет раскладке нечего распределять: колонка заполняется сама. */
+#about     { margin-block-end: 0; }
+#elsewhere { margin-block-start: var(--space-section); }
 
 /* Отступ сверху у best — тот же --space-section, что и швы .wrapper.
      Раньше он стоял поверх block-gap, и над «#best of» получалась дыра
@@ -263,6 +351,11 @@ main {
   font-family: var(--mono);
   font-size: clamp(1.5rem, 4vw, 2rem);
   font-weight: 500;
+  /* 1.2, а не унаследованные от body 1.65. Заголовок 32px занимал коробку
+     52.8px: двадцать пикселей пустоты сверху и снизу, которых не видно в
+     токенах, но которые складывались с gap блока. Отступ «по шкале» на
+     деле был больше шкалы, и это читалось как забытый воздух. */
+  line-height: 1.2;
   color: var(--text-strong);
   text-wrap: balance;
 }
@@ -300,7 +393,9 @@ main {
 }
 
 .fact {
-  font-size: 1.0625rem;
+  /* 18px — ступень шкалы. Было 17px: размер, которого нет ни в одном
+     шаге, и он ставил факты между body и названиями строк без причины. */
+  font-size: 1.125rem;
   line-height: 1.45;
   color: var(--text);
   text-wrap: pretty;
@@ -310,10 +405,14 @@ main {
   color: var(--accent);
   text-decoration: none;
   border-bottom: 1px solid currentColor;
-  transition: color 0.15s ease;
+  transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.fact__link:hover { color: var(--signal); }
+/* Ховер уводит ссылку в цвет основного текста, а не в зелёный: зелёный
+   был вторым акцентом рядом с голубым, и ссылка при наведении меняла
+   палитру страницы. Здесь меняется только вес — подчёркивание остаётся
+   на месте, поэтому ссылка не прыгает. */
+.fact__link:hover { color: var(--text-strong); }
 
 .fact__link:focus-visible {
   outline: 2px solid var(--accent);
@@ -356,13 +455,18 @@ main {
   font-size: 0.875rem;
   text-decoration: none;
   white-space: nowrap;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* Ховер — в акцент, а не в зелёный: --signal остался микро-сигналом щита
+   в шапке, и вторым акцентом в интерактиве он больше не работает. */
 .chip:hover {
-  color: var(--signal);
-  border-color: var(--signal);
+  color: var(--accent);
+  border-color: var(--accent);
 }
+
+.chip:active { background: var(--surface-2); }
 
 .chip__icon {
   flex: none;
@@ -401,43 +505,46 @@ main {
   padding: var(--space-3) var(--space-4);
   text-decoration: none;
   color: inherit;
-  transition: background 0.15s ease;
+  transition: background 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .row:hover { background: var(--surface-2); }
 
+/* Нажатие отмечается полосой у левого края: фон уже занят ховером, и
+   второй оттенок поверхности рядом с первым неразличим. Тень рисуется
+   внутрь строки — панель обрезает всё, что выходит наружу. */
+.row:active {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Знак без плашки. Плашка 36px с заливкой --surface-2 была фоном для
+   глифа, но четыре из пяти знаков — это favicon чужого проекта со своей
+   квадратной подложкой внутри файла. Плашка под плашкой давала рамку в
+   рамке: у Scene оранжевый квадрат в сером, у stats и ctf тёмный в
+   тёмном. Знак — это сам файл, второй фон ему не нужен.
+
+   Размер 24px, а не 20px: без плашки 20px читались как значки в списке
+   настроек, а не как проекты. 24px держит вес строки, не споря с
+   названием, и попадает в тот же диапазон, что знак спотлайта (28px).
+
+   object-fit: contain оставлен: знаки разной природы (svg и растр)
+   приводятся к одному боксу, а не растягиваются под него. */
 .row__icon {
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius);
-  background: var(--surface-2);
+  width: 24px;
+  height: 24px;
   color: var(--accent);
 }
 
-/* Знак внутри плитки — фиксированные 20px, а не 100% плитки.
-
-   Плитка 36px, и при width: 100% глиф занимал её целиком, без отступа:
-   самолётик Telegram читался не значком в плитке, а плошкой, и был
-   заметно крупнее прочих знаков страницы. Тот же размер, что и у
-   .pill__icon, — и он по той же причине рабочий: 20px это размер
-   знака, который на странице и должен быть, а размер плитки отвечает
-   за вес блока, а не за размер глифа.
-
-   У .chip__icon и .spotlight__icon внутренний знак остаётся 100%: там
-   плитка сама себе знак (16px и 28px), и отступ ей не нужен — дать его
-   значило бы просто отрисовать знак вдвое мельче. Здесь плитка 36px,
-   и 20px знака внутри неё оставляют рамку в 8px с каждой стороны.
-
-   object-fit: contain оставлен: знаки разной природы (svg и растр)
-   приводятся к одному боксу, а не растягиваются под него. */
 .row__icon img,
 .row__icon svg {
   display: block;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   object-fit: contain;
 }
 
@@ -446,7 +553,6 @@ main {
 /* Знак канала в фирменном цвете: он и без подписи узнаётся, а общий
    акцент на первой строке сделал бы её просто ещё одной. */
 .row--accent .row__icon {
-  background: var(--accent-soft);
   color: var(--tg);
 }
 
@@ -459,7 +565,7 @@ main {
 
 .row__name {
   color: var(--text-strong);
-  font-size: 1.0625rem;
+  font-size: 1.125rem;
   font-weight: 500;
 }
 
@@ -487,9 +593,13 @@ main {
 
 /* --- best of ------------------------------------------------------------ */
 
+/* Рамка по кругу, а не полоса слева. Полоса рисовала у карточки одну
+   сторону — приём, который читается как закладка или обрезанный край,
+   а не как рамка. Тонкий контур по всему периметру держит карточку
+   целиком и не спорит с панелью projects, у которой рамки нет вовсе. */
 .spotlight {
   background: var(--surface);
-  border-left: 2px solid var(--accent);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
 }
@@ -521,14 +631,14 @@ main {
 
 .spotlight__name {
   font-family: var(--mono);
-  font-size: 0.9375rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--accent);
 }
 
 .spotlight__note {
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
@@ -593,7 +703,7 @@ main {
 .also {
   margin: 0;
   font-family: var(--mono);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   line-height: 1.75;
   color: var(--muted);
 }
@@ -637,7 +747,8 @@ main {
   background: var(--surface);
   color: var(--muted);
   cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition: color 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+              border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .theme-toggle__icon { display: none; }
@@ -661,9 +772,11 @@ main {
 }
 
 .theme-toggle:hover {
-  color: var(--signal);
-  border-color: var(--signal);
+  color: var(--accent);
+  border-color: var(--accent);
 }
+
+.theme-toggle:active { background: var(--surface-2); }
 
 /* --- Фокус -------------------------------------------------------------- */
 
@@ -675,7 +788,8 @@ main {
 .chip:focus-visible,
 .row:focus-visible,
 .fact__link:focus-visible,
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+.skip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -704,6 +818,10 @@ main {
 
   #about    { margin-block-end: var(--space-section); }
   #projects { margin-block-end: var(--space-section); }
+
+  /* В одной колонке шов над elsewhere уже даёт about, и второй такой же
+     сверху сложился бы с ним в двойной промежуток. */
+  #elsewhere { margin-block-start: 0; }
 
   /* У best на широком экране отступ сверху: он третий ряд и отделён от
      верхних блоков. В одной колонке над ним стоит projects, который уже
@@ -773,7 +891,6 @@ main {
        Гасится токенами, а не background-image: none, потому что те же
        токены могут пригодиться вложенным элементам. */
     --grid-line: transparent;
-    --glow: transparent;
   }
 
   /* Гасим и сам background-image: фон по умолчанию печатать не
@@ -813,6 +930,11 @@ main {
      осталось: печатный блок под @media 640px не попадает, и снимать
      margin-block-start у best обязан он сам. */
   #best { margin-block-start: 0; }
+
+  /* Шов перед elsewhere в печати даёт margin-block-end у best, как и на
+     остальных стыках: колонка одна, и верхнее поле блока здесь было бы
+     вторым отступом поверх первого. */
+  #elsewhere { margin-block-start: 0; }
 
   /* Скругление панели держится на обрезании: на бумаге углы должны быть
      прямыми, и панель обязана отдать этот угол содержимому строк. */
