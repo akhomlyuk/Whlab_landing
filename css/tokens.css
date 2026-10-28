@@ -68,6 +68,11 @@
   --radius-md: 12px;
   --radius-lg: 14px;
 
+  /* Аватар в шапке. Спека §5: 64px. Токен, а не литерал в двух местах:
+     от этой же величины считается отступ подписи под именем, и если
+     аватар однажды вырастет, подпись обязана поехать вместе с ним. */
+  --avatar-size: 64px;
+
   --font: 'Ubuntu', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
 
