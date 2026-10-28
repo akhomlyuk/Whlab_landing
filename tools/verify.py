@@ -121,7 +121,7 @@ def check_tokens() -> None:
 REQUIRED_TEXT = (
     "Exited3n",
     "FR13NDS",
-    "$ whoami",
+    "whoami",
     "Red team · Pentest · DFIR",
     "about",
     "elsewhere",
@@ -1036,7 +1036,7 @@ CONTRAST_PAIRS = (
     ("--signal", "--bg", 4.5),
     ("--signal", "--surface", 4.5),
     ("--signal", "--surface-2", 4.5),
-    # Фирменные знаки: и на плитке, и прямо на фоне карточки и пилюли
+    # Фирменные знаки: и на плитке, и прямо на фоне карточки и чипа
     ("--tg", "--surface", 3.0),
     ("--tg", "--surface-2", 3.0),
     ("--brand-ink", "--surface", 3.0),
@@ -1129,9 +1129,11 @@ def check_contrast_pairs() -> None:
 def check_link_placement() -> None:
     """Ссылки живут там, куда их поместили, а не где попалось.
 
-    Спека §3.4: переход на канал — главная причина прийти, поэтому
-    t.me/wh_lab обязан быть и в шапке, и первой карточкой projects.
-    Standoff 365 остаётся ссылкой внутри факта в about.
+    Спека §3.4 в редакции 2026-10-28: владелец перенёс Telegram и GitHub
+    из шапки в ленту elsewhere, и ряд кнопок под именем исчез. Канал при
+    этом остаётся и первой карточкой projects: главный переход обязан
+    читаться в списке, а не только в подвале. Standoff 365 остаётся
+    ссылкой внутри факта в about.
     """
     html = read_if_present("index.html")
     if html is None:
@@ -1155,40 +1157,38 @@ def check_link_placement() -> None:
     if "standoff365.com/profile/Exited3n/" not in about:
         errors.append("about: нет ссылки на профиль Standoff 365 — факт должен быть кликабельным")
     if about.count("t.me/wh_lab"):
-        errors.append("about: ссылка на канал вернулась — канал живёт в шапке и в projects")
+        errors.append("about: ссылка на канал вернулась — канал живёт в projects и в elsewhere")
 
     if "t.me/wh_lab" not in projects:
         errors.append("projects: нет карточки Whitehat Lab — главный переход на канал исчез")
 
-    # Дубль ссылки обязателен, но пара «где именно» у каждой своя, и
-    # требовать обе в elsewhere было бы противоречием: канал живёт в
-    # шапке и в projects, а не в ленте ссылок, — ровно это и написано в
-    # докстринге выше. Поэтому elsewhere проверяется только у той
-    # ссылки, которая по контракту там стоит, а обе обязаны
-    # встретиться на странице дважды.
-    if "github.com/akhomlyuk" not in elsewhere:
-        errors.append("elsewhere: нет ссылки github.com/akhomlyuk")
+    for url, where in (
+        ("t.me/wh_lab", "elsewhere"),
+        ("github.com/akhomlyuk", "elsewhere"),
+    ):
+        if url not in elsewhere:
+            errors.append(f"elsewhere: нет ссылки {url}")
 
     # Шапка проверяется отдельно от счёта вхождений. Счёт «два раза на
-    # странице» ничего не говорит о том, где именно: перенос пилюли
-    # Telegram из header в footer оставил бы счёт на месте и прошёл бы
-    # прогон, хотя главный переход на канал ушёл с первого экрана.
+    # странице» ничего не говорит о том, где именно: возвращённая в header
+    # пилюля оставила бы счёт на месте и прошла бы прогон, хотя решение
+    # владельца — держать шапку без ссылок — уже нарушено.
     hero = re.search(r'<header class="hero">(.*?)</header>', html, re.DOTALL)
     if hero is None:
         errors.append("index.html: не найден <header class=\"hero\">")
     else:
         for url in ("t.me/wh_lab", "github.com/akhomlyuk"):
-            if url not in hero.group(1):
-                errors.append(f"hero: нет ссылки {url} — переход с первого экрана пропал")
+            if url in hero.group(1):
+                errors.append(f"hero: ссылка {url} вернулась в шапку — ей место в elsewhere")
 
-    for url, where in (
-        ("t.me/wh_lab", "в шапке и в projects"),
-        ("github.com/akhomlyuk", "в шапке и в ленте ссылок"),
+    for url, expected, where in (
+        ("t.me/wh_lab", 2, "в projects и в elsewhere"),
+        ("github.com/akhomlyuk", 1, "в elsewhere"),
     ):
-        if html.count(url) < 2:
-            errors.append(f"index.html: {url} должна быть и {where}")
+        if html.count(url) != expected:
+            errors.append(f"index.html: {url} должна встречаться {expected} раз(а) — {where}")
 
-    notes.append("Ссылки: шапка, about, projects и elsewhere проверены")
+    notes.append("Ссылки: about, projects, elsewhere и пустая шапка проверены")
 
 
 def check_chips() -> None:
@@ -1437,34 +1437,43 @@ def check_two_column_layout() -> None:
 
 
 def check_hero() -> None:
-    """Hero по спеке §5: строка $ whoami, курсор, две CTA-ссылки.
+    """Hero по спеке §5: промпт `$ whoami`, имя, роль — и больше ничего.
 
-    Дублирование hero CTA + elsewhere разрешено спекой §7 — поэтому
-    каждая из двух ссылок обязана встретиться на странице дважды.
+    Ссылок в шапке нет с 2026-10-28: владелец перенёс Telegram и GitHub в
+    `elsewhere`, а от кнопок под именем осталась одна строка роли. Промпт
+    набран тем же кеглем и цветом, что заголовки блоков, поэтому проверка
+    требует не литерал «$ whoami», а маркер и слово по отдельности:
+    доллар живёт в span и красится общим правилом с решёткой.
     """
     html = read_if_present("index.html")
     if html is None:
         return
-    if "$ whoami" not in html:
-        errors.append("index.html: нет строки '$ whoami' над именем в hero")
+    hero = re.search(r'<header class="hero">(.*?)</header>', html, re.DOTALL)
+    if hero is None:
+        errors.append("index.html: не найден <header class=\"hero\">")
+        return
+    body = hero.group(1)
+    if "hero__prompt-mark" not in body:
+        errors.append("hero: у `$ whoami` нет акцентного маркера hero__prompt-mark")
+    if "whoami" not in body:
+        errors.append("index.html: нет строки whoami над именем в hero")
     # Мигающий курсор убран решением владельца 2026-10-09: анимация
     # мигала вопреки просьбе и раздражала. Проверка остаётся, чтобы он
     # не вернулся вместе с правкой оформления hero.
     if "hero__cursor" in html or "cursor-blink" in html:
-        errors.append("index.html: курсор в строке '$ whoami' вернулся — он убран по решению владельца")
+        errors.append("index.html: курсор в строке whoami вернулся — он убран по решению владельца")
     # Дубль: факт «с 2010 года» живёт в about, в hero повторять его незачем.
     if "10+ лет в информационной безопасности" in html:
         errors.append(
             "index.html: строка «10+ лет в информационной безопасности» вернулась "
             "в hero — она дублирует факт из about"
         )
-    # Ссылка на профиль Standoff уехала в about, из ленты ссылок убрана.
-    for url, where in (
-        ("https://github.com/akhomlyuk", "hero-CTA и elsewhere"),
-    ):
-        if html.count(url) < 2:
-            errors.append(f"index.html: {url} должна быть в {where}")
-    notes.append("Hero: whoami, отсутствие курсора и CTA проверены")
+    # Ссылки уехали в elsewhere: если они снова появятся в шапке, вернётся
+    # и ряд кнопок, ради которого сюда когда-то приезжал .pill.
+    for url in ("t.me/wh_lab", "github.com/akhomlyuk"):
+        if url in body:
+            errors.append(f"hero: ссылка {url} вернулась в шапку — ей место в elsewhere")
+    notes.append("Hero: whoami с маркером, без курсора и без ссылок")
 
 
 def check_reduced_motion() -> None:
